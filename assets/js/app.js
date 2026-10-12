@@ -1,4 +1,4 @@
-/* TAJO TAP Frontend + Backend V3
+/* TAJO TAP Frontend + Backend V3.4
  * Production-oriented SPA connected to Vercel Functions + Supabase.
  * Sensitive Supabase keys stay server-side; browser talks only to same-origin /api routes.
  */
@@ -42,8 +42,12 @@
     chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>',
     wifi: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M5 12.5a10 10 0 0 1 14 0M8 15.5a6 6 0 0 1 8 0M11 18.5a2 2 0 0 1 2 0"/><circle cx="12" cy="21" r="1" fill="currentColor" stroke="none"/></svg>',
     lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
-    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>'
+    sales: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/><path d="m4 8 5-3 5 6 5-8"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v5M14 11v5"/></svg>',
+    target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M20 4 14 10"/></svg>'
   };
+
+  const PLAYBOOK = window.TAJO_TAP_SALES_PLAYBOOK || { prospecting: [], principles: [], scripts: [], objections: [], routine: [], guardrails: [] };
 
 
   const persisted = safeParse(localStorage.getItem('tajoTapPrefs')) || {};
@@ -232,6 +236,7 @@
       ['scanner','scan','Escanear'],
       ['clients','clients','Clientes'],
       ['analytics','analytics','Analytics'],
+      ['sales','sales','Vendas'],
       ['settings','settings','Configurações']
     ];
     const navHtml = nav.map(([path, icon, label]) => `<a class="nav-item ${active === path || (active === 'plaque' && path === 'plaques') ? 'active':''}" href="#/${path}">${ICONS[icon]}<span>${label}</span></a>`).join('');
@@ -243,7 +248,8 @@
           <nav class="nav-group" aria-label="Navegação principal"><div class="nav-label">Operação</div>${navHtml}</nav>
           <div class="sidebar-spacer"></div>
           <div class="sidebar-help"><strong>Precisa localizar uma placa?</strong><p>Abra a câmera e escaneie o QR Code físico.</p><button class="btn btn-soft btn-sm" data-action="open-scanner">${ICONS.scan} Escanear agora</button></div>
-          <div class="sidebar-user"><div class="avatar">${esc(userInitials())}</div><div class="meta"><strong>${esc(state.user?.name || 'Administrador')}</strong><span>Administrador</span></div><button class="btn btn-icon btn-sm btn-ghost" data-action="logout" aria-label="Sair">${ICONS.logout}</button></div>
+          <div class="sidebar-user"><div class="avatar">${esc(userInitials())}</div><div class="meta"><strong>${esc(state.user?.name || 'Administrador')}</strong><span>Administrador</span></div></div>
+          <button class="sidebar-logout" type="button" data-action="logout">${ICONS.logout}<span>Sair da conta</span></button>
         </aside>
         <div class="drawer-backdrop ${state.sidebarOpen ? 'show':''}" data-action="close-sidebar"></div>
         <div class="app-main">
@@ -265,7 +271,7 @@
           <a class="${active==='plaques'||active==='plaque'?'active':''}" href="#/plaques">${ICONS.plate}<span>Placas</span></a>
           <a class="scan-main" href="#/scanner">${ICONS.scan}<span>Scan</span></a>
           <a class="${active==='clients'?'active':''}" href="#/clients">${ICONS.clients}<span>Clientes</span></a>
-          <a class="${active==='analytics'?'active':''}" href="#/analytics">${ICONS.analytics}<span>Dados</span></a>
+          <a class="${active==='sales'?'active':''}" href="#/sales">${ICONS.sales}<span>Vendas</span></a>
         </nav>
       </div>`;
   }
@@ -277,6 +283,7 @@
     if (r.name === 'scanner') return scannerPage();
     if (r.name === 'clients') return clientsPage();
     if (r.name === 'analytics') return analyticsPage();
+    if (r.name === 'sales') return salesPage();
     if (r.name === 'settings') return settingsPage();
     return notFoundPage();
   }
@@ -305,6 +312,7 @@
             ${quick('Escanear uma placa','Use a câmera para localizar e gerenciar uma unidade.','scan','open-scanner')}
             ${quick('Alterar destino','Encontre uma placa e troque o direcionamento em segundos.','link','go-plaques')}
             ${quick('Ver desempenho','Entenda QR x NFC e os pontos com mais acessos.','analytics','go-analytics')}
+            ${quick('Scripts de vendas','Abra o playbook comercial com abordagem, objeções e follow-up.','sales','go-sales')}
           </div>
         </div>
         <div class="card card-pad">
@@ -351,7 +359,7 @@
         <div class="stack">
           <section class="card card-pad"><div class="card-title"><div><h2>QR da plaquinha</h2><p>Use este QR na impressão do acrílico.</p></div></div><div class="qr-frame"><canvas class="qr-canvas" data-qr="${esc(qrUrl)}" width="512" height="512"></canvas></div><div class="qr-caption mono">${esc(qrUrl)}</div><div class="row wrap" style="justify-content:center;margin-top:16px"><button class="btn btn-ghost" data-action="download-qr" data-code="${esc(p.code)}">${ICONS.download} Baixar PNG</button><button class="btn btn-ghost" data-action="copy" data-copy="${esc(nfcUrl)}">${ICONS.wifi} Copiar NFC</button></div></section>
           <section class="card card-pad"><div class="card-title"><div><h3>Origem dos acessos</h3><p>QR e NFC são contabilizados separadamente.</p></div></div>${breakdown('QR Code',p.qr,p.scansTotal)}${breakdown('NFC / aproximação',p.nfc,p.scansTotal)}</section>
-          <section class="card card-pad danger-zone"><div class="card-title"><div><h3>Zona de risco</h3><p>Use somente para testes, unidades duplicadas ou plaquinhas que realmente devem deixar de existir.</p></div></div><div class="danger-zone-row"><div><strong>Excluir plaquinha permanentemente</strong><span>Remove a plaquinha, PIN, destinos e histórico de acessos vinculados. O cliente não é excluído.</span></div><button class="btn btn-danger" data-action="delete-plate" data-code="${esc(p.code)}">${ICONS.trash} Excluir plaquinha</button></div></section>
+          <section class="card card-pad danger-card"><div class="card-title"><div><h3>Zona de teste e exclusão</h3><p>Use para remover unidades criadas apenas para testes. A exclusão apaga destinos, PIN e eventos vinculados à plaquinha.</p></div></div><button class="btn btn-danger" data-action="delete-plate" data-code="${esc(p.code)}">${ICONS.trash} Excluir plaquinha</button></section>
         </div>
       </div>`;
   }
@@ -394,11 +402,31 @@
       </section>`;
   }
 
+  function salesPage() {
+    const scriptCards = PLAYBOOK.scripts.map(item => `<article class="sales-script-card" data-sales-search="${esc([item.title,item.context,item.category,item.text].join(' ').toLowerCase())}"><div class="sales-card-top"><div><span class="sales-tag">${esc(item.category)}</span><h3>${esc(item.title)}</h3><p>${esc(item.context)}</p></div><button class="btn btn-sm btn-ghost" data-action="copy-sales-script" data-script-id="${esc(item.id)}">${ICONS.copy} Copiar</button></div><div class="sales-script-text">${esc(item.text)}</div></article>`).join('');
+    const objectionCards = PLAYBOOK.objections.map(item => `<article class="objection-card" data-sales-search="${esc([item.objection,item.answer].join(' ').toLowerCase())}"><div class="objection-q"><span>Objeção</span><strong>${esc(item.objection)}</strong></div><div class="objection-a"><span>Resposta sugerida</span><p>${esc(item.answer)}</p></div><button class="btn btn-sm btn-ghost" data-action="copy-objection" data-objection-id="${esc(item.id)}">${ICONS.copy} Copiar resposta</button></article>`).join('');
+    const leadCards = PLAYBOOK.prospecting.map(item => `<article class="sales-mini-card" data-sales-search="${esc([item.title,item.text].join(' ').toLowerCase())}"><span class="icon-box">${ICONS.target}</span><h3>${esc(item.title)}</h3><p>${esc(item.text)}</p></article>`).join('');
+    const principleCards = PLAYBOOK.principles.map(item => `<article class="sales-principle" data-sales-search="${esc([item.title,item.application].join(' ').toLowerCase())}"><strong>${esc(item.title)}</strong><p>${esc(item.application)}</p></article>`).join('');
+    return `
+      ${pageHead('Playbook comercial','Vendas TAJO TAP','Um centro de prospecção e fechamento adaptado ao produto: quem abordar, o que observar, como demonstrar valor, responder objeções e acompanhar cada oportunidade.', `<button class="btn btn-primary" data-action="sales-routine">${ICONS.target} Rotina de prospecção</button>`)}
+      <div class="sales-searchbar input-with-icon">${ICONS.search}<input id="sales-search" class="input" placeholder="Buscar script, objeção, Google, WhatsApp, preço..."></div>
+      <section class="sales-hero-grid">
+        <article class="card card-pad sales-positioning"><div class="eyebrow">Posicionamento</div><h2>Venda a redução de atrito, não “um QR Code”.</h2><p>${esc(PLAYBOOK.promise || '')}</p><div class="sales-principle-strip"><span>Um toque</span><span>Menos passos</span><span>Destino editável</span><span>QR + NFC</span></div></article>
+        <article class="card card-pad"><div class="card-title"><div><h2>Neuromarketing ético</h2><p>Princípios de decisão aplicados sem manipulação.</p></div><span class="badge badge-success">USO ÉTICO</span></div><div class="sales-guardrails">${PLAYBOOK.guardrails.map(x=>`<div>${ICONS.check}<span>${esc(x)}</span></div>`).join('')}</div></article>
+      </section>
+      <section class="sales-section"><div class="sales-section-head"><div><span class="eyebrow">Prospecção</span><h2>Como encontrar clientes que realmente têm aderência</h2></div></div><div class="sales-mini-grid">${leadCards}</div></section>
+      <section class="sales-section"><div class="sales-section-head"><div><span class="eyebrow">Decisão</span><h2>Princípios de neuromarketing aplicados à TAJO TAP</h2></div></div><div class="sales-principles-grid">${principleCards}</div></section>
+      <section class="sales-section"><div class="sales-section-head"><div><span class="eyebrow">Scripts</span><h2>Abordagem, demonstração, fechamento e follow-up</h2></div><span class="chip">Copie e personalize</span></div><div class="sales-scripts-grid" id="sales-script-grid">${scriptCards}</div></section>
+      <section class="sales-section"><div class="sales-section-head"><div><span class="eyebrow">Objeções</span><h2>Respostas profissionais sem pressão</h2></div></div><div class="objection-grid" id="sales-objection-grid">${objectionCards}</div></section>
+      <section class="card card-pad sales-routine-card"><div class="card-title"><div><h2>Rotina comercial recomendada</h2><p>Use como checklist diário e acompanhe conversão por etapa.</p></div><span class="chip">Execução</span></div><ol>${PLAYBOOK.routine.map(x=>`<li>${esc(x)}</li>`).join('')}</ol></section>`;
+  }
+
   function settingsPage() {
-    return `${pageHead('Sistema','Configurações','Preferências visuais e parâmetros do TAJO TAP.', '')}
+    return `${pageHead('Sistema','Configurações','Preferências, sessão e parâmetros do TAJO TAP.', '')}
       <div class="detail-grid">
-        <section class="card card-pad"><div class="card-title"><div><h2>Identidade</h2><p>A marca oficial já está aplicada em todo o sistema.</p></div></div><div class="row" style="padding:20px;background:#fff;border-radius:16px;border:1px solid #e5e8e4"><img src="assets/images/tajo-tap-logo.png" style="width:min(260px,80%)" alt="TAJO TAP"></div><div class="form-grid" style="margin-top:18px"><div class="field"><label>Domínio principal</label><input class="input" value="${esc(CONFIG.primaryDomain)}"></div><div class="field"><label>Motor das plaquinhas</label><input class="input" value="${esc(CONFIG.goDomain)}"></div></div></section>
-        <section class="card card-pad"><div class="card-title"><div><h2>Experiência</h2><p>Preferências locais do frontend.</p></div></div><div class="destination-option"><div class="destination-icon">${state.theme==='dark'?ICONS.moon:ICONS.sun}</div><div class="destination-copy" style="flex:1"><strong>Tema ${state.theme==='dark'?'escuro':'claro'}</strong><span>Você pode alternar a qualquer momento.</span></div><button class="btn btn-sm btn-ghost" data-action="theme">Alternar</button></div><div class="destination-option" style="margin-top:12px"><div class="destination-icon">${ICONS.lock}</div><div class="destination-copy"><strong>Backend conectado</strong><span>Vercel Functions + Supabase Auth + PostgreSQL + motor de redirecionamento.</span></div></div></section>
+        <section class="card card-pad"><div class="card-title"><div><h2>Identidade</h2><p>A marca oficial já está aplicada em todo o sistema.</p></div></div><div class="row" style="padding:20px;background:#fff;border-radius:16px;border:1px solid #e5e8e4"><img src="assets/images/tajo-tap-logo.png" style="width:min(260px,80%)" alt="TAJO TAP"></div><div class="form-grid" style="margin-top:18px"><div class="field"><label>Domínio principal</label><input class="input" readonly value="${esc(CONFIG.primaryDomain)}"></div><div class="field"><label>Sistema TAJO TAP</label><input class="input" readonly value="${esc(CONFIG.goDomain)}"></div></div></section>
+        <div class="stack"><section class="card card-pad"><div class="card-title"><div><h2>Experiência</h2><p>Preferências locais do frontend.</p></div></div><div class="destination-option"><div class="destination-icon">${state.theme==='dark'?ICONS.moon:ICONS.sun}</div><div class="destination-copy" style="flex:1"><strong>Tema ${state.theme==='dark'?'escuro':'claro'}</strong><span>Você pode alternar a qualquer momento.</span></div><button class="btn btn-sm btn-ghost" data-action="theme">Alternar</button></div><div class="destination-option" style="margin-top:12px"><div class="destination-icon">${ICONS.lock}</div><div class="destination-copy"><strong>Backend conectado</strong><span>Vercel Functions + Supabase Auth + PostgreSQL + motor de redirecionamento.</span></div></div></section>
+        <section class="card card-pad"><div class="card-title"><div><h2>Sessão</h2><p>Conta atualmente autenticada no sistema.</p></div></div><div class="account-session"><div class="avatar">${esc(userInitials())}</div><div><strong>${esc(state.user?.name || 'Administrador')}</strong><span>${esc(state.user?.email || 'Conta TAJO TAP')}</span></div></div><button class="btn btn-dark" style="width:100%;margin-top:16px" data-action="logout">${ICONS.logout} Sair da conta</button></section></div>
       </div>`;
   }
 
@@ -632,12 +660,6 @@
     showModal(`<div class="modal-head"><div><div class="eyebrow">${esc(code)}</div><h2>Alterar destino</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="destination-form" data-code="${esc(code)}"><div class="modal-body"><p class="text-muted" style="margin-top:0">O QR Code e o NFC da plaquinha permanecem os mesmos.</p><div class="choice-grid" id="destination-choice-grid">${[['google','Avaliações Google'],['whatsapp','WhatsApp'],['instagram','Instagram'],['smart','Smart Page'],['map','Localização'],['custom','Outro link']].map(([id,n])=>`<button type="button" class="choice destination-modal-choice ${current===id?'active':''}" data-type="${id}">${destinationIcon(id)}<strong>${n}</strong><span>${id==='smart'?'Página inteligente TAJO':'Redirecionamento dinâmico'}</span></button>`).join('')}</div><input type="hidden" name="type" value="${current}"><div class="field"><label>Destino / configuração</label><input class="input" name="destination" value="${esc(p.destination)}" placeholder="https://..." required><span class="field-help">O backend valida o endereço antes de salvar. Use sempre um link HTTPS válido.</span></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar alteração</button></div></form>`);
   }
 
-
-  function deletePlateModal(code) {
-    const p=state.plaques.find(x=>x.code===code); if(!p || state.role!=='admin') return;
-    showModal(`<div class="modal-head"><div><div class="eyebrow text-danger">Exclusão permanente</div><h2>Excluir ${esc(p.code)}?</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal" aria-label="Fechar">${ICONS.close}</button></div><form id="delete-plate-form" data-code="${esc(p.code)}"><div class="modal-body stack"><div class="delete-warning"><div class="delete-warning-icon">${ICONS.trash}</div><div><strong>Esta ação não pode ser desfeita.</strong><span>A plaquinha será removida do sistema junto com PIN, destinos e histórico de acessos vinculados. A conta do cliente continuará existindo.</span></div></div><div class="field"><label>Para confirmar, digite <span class="mono">${esc(p.code)}</span></label><input class="input mono" name="confirmCode" autocomplete="off" spellcheck="false" placeholder="${esc(p.code)}" required><span class="field-help">Recomendado para unidades de teste, cadastros duplicados ou peças descartadas.</span></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-danger" type="submit">${ICONS.trash} Excluir permanentemente</button></div></form>`);
-  }
-
   function newClientModal() {
     showModal(`<div class="modal-head"><div><div class="eyebrow">Clientes</div><h2>Novo cliente</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="new-client-form"><div class="modal-body stack"><div class="field"><label>Empresa</label><input class="input" name="name" required placeholder="Nome do estabelecimento"></div><div class="form-grid"><div class="field"><label>Responsável</label><input class="input" name="contact" required></div><div class="field"><label>WhatsApp</label><input class="input" name="phone" inputmode="tel" required></div></div><div class="field"><label>Cidade / Estado</label><input class="input" name="city" required></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Cadastrar cliente</button></div></form>`);
   }
@@ -731,12 +753,26 @@
       const update=()=>filterPlaques(input?.value||'',filter?.value||'all');
       input?.addEventListener('input',update); filter?.addEventListener('change',update);
     }
+    if(r.name==='sales') {
+      const input=$('#sales-search');
+      input?.addEventListener('input',()=>filterSales(input.value));
+    }
   }
 
   function filterPlaques(term,status) {
     const q=term.toLowerCase().trim();
     $$('#plaque-tbody tr').forEach(row=>{ const code=row.textContent.toLowerCase(); const p=state.plaques.find(x=>code.includes(x.code.toLowerCase())); row.hidden = !(!q||code.includes(q)) || !(status==='all'||p?.status===status); });
     $$('#plaque-mobile-list .mobile-card').forEach(card=>{ const txt=card.textContent.toLowerCase(); const p=state.plaques.find(x=>txt.includes(x.code.toLowerCase())); card.hidden=!(!q||txt.includes(q)) || !(status==='all'||p?.status===status); });
+  }
+
+  function filterSales(term) {
+    const q=String(term||'').toLowerCase().trim();
+    $$('[data-sales-search]').forEach(card => { card.hidden = Boolean(q && !String(card.dataset.salesSearch||'').includes(q)); });
+  }
+
+  function deletePlateModal(code) {
+    const p = state.plaques.find(x=>x.code===code); if(!p) return;
+    showModal(`<div class="modal-head"><div><div class="eyebrow">Ação irreversível</div><h2>Excluir ${esc(p.code)}?</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body stack"><div class="danger-alert">${ICONS.trash}<div><strong>Esta exclusão é permanente.</strong><p>Serão removidos a plaquinha, PIN de ativação, destinos e eventos vinculados. Use principalmente para unidades criadas em testes.</p></div></div><div class="field"><label for="delete-plate-confirm">Digite <span class="mono">${esc(p.code)}</span> para confirmar</label><input id="delete-plate-confirm" class="input mono" autocomplete="off" placeholder="${esc(p.code)}"></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-danger" data-action="confirm-delete-plate" data-code="${esc(p.code)}">${ICONS.trash} Excluir definitivamente</button></div>`);
   }
 
   function generateCode() {
@@ -793,10 +829,21 @@
     if(action==='copy') copyText(actionEl.dataset.copy||'');
     if(action==='download-qr') downloadQR(actionEl.dataset.code);
     if(action==='edit-destination') editDestinationModal(actionEl.dataset.code);
-    if(action==='delete-plate') deletePlateModal(actionEl.dataset.code);
     if(action==='toggle-plate') { const p=state.plaques.find(x=>x.code===actionEl.dataset.code); if(p&&state.role==='admin'){ try{ const target=p.status==='paused'?'active':'paused'; const out=await apiFetch(`/api/admin/plate?code=${encodeURIComponent(p.code)}`,{method:'PATCH',body:{status:target}}); Object.assign(p,out.plate); toast('Status atualizado'); render(); }catch(err){ toast('Não foi possível atualizar',err.message); } } }
     if(action==='go-plaques') go('plaques');
     if(action==='go-analytics') go('analytics');
+    if(action==='go-sales') go('sales');
+    if(action==='copy-sales-script'){ const item=PLAYBOOK.scripts.find(x=>x.id===actionEl.dataset.scriptId); if(item) copyText(item.text); }
+    if(action==='copy-objection'){ const item=PLAYBOOK.objections.find(x=>x.id===actionEl.dataset.objectionId); if(item) copyText(item.answer); }
+    if(action==='sales-routine'){ copyText((PLAYBOOK.routine||[]).map((x,i)=>`${i+1}. ${x}`).join('\n')); }
+    if(action==='delete-plate' && state.role==='admin') deletePlateModal(actionEl.dataset.code);
+    if(action==='confirm-delete-plate' && state.role==='admin'){
+      const code=actionEl.dataset.code; const confirmCode=String($('#delete-plate-confirm')?.value||'').trim().toUpperCase();
+      if(confirmCode!==code){ toast('Confirmação incorreta',`Digite ${code} exatamente para excluir.`); return; }
+      if(state.busy) return; state.busy=true; actionEl.disabled=true;
+      try { await apiFetch(`/api/admin/plate?code=${encodeURIComponent(code)}`,{method:'DELETE',body:{confirmCode}}); state.plaques=state.plaques.filter(x=>x.code!==code); closeModal(); toast('Plaquinha excluída',`${code} foi removida do sistema.`); go('plaques'); }
+      catch(err){ toast('Não foi possível excluir',err.message); actionEl.disabled=false; } finally { state.busy=false; }
+    }
     if(action==='activation-home'){ go(state.role==='admin'?'dashboard':state.role==='client'?'portal':'login'); }
     if(action==='activation-retry'){ state.activation.loaded=false;state.activation.error='';state.activation.plate=null;render(); }
     if(action==='activation-account-mode'){ state.activation.accountMode=actionEl.dataset.mode==='existing'?'existing':'signup';render(); }
@@ -885,17 +932,6 @@
       e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target), p=state.plaques.find(x=>x.code===e.target.dataset.code); if(!p) return;
       try { const endpoint=state.role==='admin'?'/api/admin/destination':'/api/client/destination'; const out=await apiFetch(endpoint,{method:'POST',body:{code:p.code,type:fd.get('type'),url:fd.get('destination')}}); Object.assign(p,out.plate); closeModal();toast('Destino atualizado','A plaquinha física continua a mesma.');render(); }
       catch(err){toast('Não foi possível alterar',err.message);}
-    }
-    if(e.target.id==='delete-plate-form'){
-      e.preventDefault(); if(!e.target.reportValidity() || state.role!=='admin') return;
-      const fd=new FormData(e.target), code=e.target.dataset.code, confirmCode=String(fd.get('confirmCode')||'').trim().toUpperCase();
-      if(confirmCode!==code){ toast('Confirmação incorreta',`Digite exatamente ${code} para excluir.`); return; }
-      const submit=e.target.querySelector('button[type="submit"]'); if(submit) submit.disabled=true;
-      try {
-        await apiFetch(`/api/admin/plate?code=${encodeURIComponent(code)}`,{method:'DELETE',body:{confirmCode}});
-        state.plaques=state.plaques.filter(p=>p.code!==code);
-        closeModal(); toast('Plaquinha excluída',`${code} foi removida permanentemente.`); go('plaques');
-      } catch(err){ if(submit) submit.disabled=false; toast('Não foi possível excluir',err.message); }
     }
   });
 

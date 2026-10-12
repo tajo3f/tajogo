@@ -1,4 +1,25 @@
-# TAJO TAP — Full Stack V3
+# TAJO TAP Full Stack V3.4
+
+Esta versão evolui a V3.3.1 sem exigir nova migration no banco para os recursos de interface. Mantém o fluxo `/atv/TT-XXXXXX` e adiciona recursos operacionais solicitados para uso real do painel.
+
+## Novidades V3.4
+
+- botão **Sair da conta** visível no menu lateral e em Configurações;
+- exclusão administrativa de plaquinhas com confirmação digitando o código;
+- exclusão em cascata dos dados vinculados já previstos pelas FKs do backend;
+- registro de auditoria `plate.delete` antes da remoção;
+- nova área **Vendas TAJO TAP**;
+- playbook com prospecção, lead ideal, auditoria rápida, abordagens, demonstração, fechamento e follow-up;
+- biblioteca de objeções com respostas prontas para copiar;
+- princípios de neuromarketing ético aplicados ao produto;
+- busca interna nos scripts e objeções;
+- refinamentos de responsividade para celular, tablet e desktop.
+
+## Atualização
+
+Se a V3.3.1 já está publicada e a migration `002_plate_activation_flow.sql` já foi aplicada, **não é necessário executar uma nova migration para estes recursos**. Publique os arquivos da V3.4 no mesmo projeto Vercel e faça um novo deploy.
+
+---
 
 Sistema integrado para **QR Code dinâmico + NFC**, com painel administrativo, clientes, portal de cliente, scanner, analytics e motor de redirecionamento.
 
@@ -105,17 +126,11 @@ A migration principal agora usa `public.profiles.id` como referência ao `auth.u
 
 ## V3.3 — ativação única pelo cliente
 
-A V3.3.2 usa uma única migration incremental: `supabase/migrations/002_plate_activation_flow.sql`. O cliente recebe a plaquinha e o PIN, acessa automaticamente `/atv/TT-XXXXXX`, cria ou entra na conta, escolhe o destino e confirma. A ativação pública é então bloqueada no banco. Alterações futuras são feitas apenas pelo painel autenticado.
+A V3.3.1 usa uma única migration incremental: `supabase/migrations/002_plate_activation_flow.sql`. O cliente recebe a plaquinha e o PIN, acessa automaticamente `/atv/TT-XXXXXX`, cria ou entra na conta, escolhe o destino e confirma. A ativação pública é então bloqueada no banco. Alterações futuras são feitas apenas pelo painel autenticado.
 
-**Ordem de publicação:** execute primeiro a migration `002`, depois publique o código V3.3.2 e faça o redeploy na Vercel.
+**Ordem de publicação:** execute primeiro a migration `002`, depois publique o código V3.3.1 e faça o redeploy na Vercel.
 
 
-## V3.3.2 — correção migration 42P13
+## V3.3.1 — correção migration 42P13
 
 A migration 002 agora remove e recria explicitamente as RPCs de ativação antes de defini-las. Isso corrige o erro PostgreSQL `42P13: cannot change return type of existing function` em bancos onde uma versão anterior da função já existia. A view administrativa também preserva as colunas antigas na mesma ordem e adiciona os novos campos somente no final.
-
-
-## Exclusão segura de plaquinhas (V3.3.2)
-O Super Admin pode excluir uma plaquinha permanentemente pela tela de gerenciamento. A confirmação exige digitar o código completo (ex.: `TT-YNGW64`). A exclusão é feita somente por endpoint administrativo autenticado e remove em cascata PIN, destinos e eventos de acesso vinculados; a conta/cliente não é apagada. Use para testes, duplicidades ou peças descartadas.
-
-Não há nova migration de banco nesta versão: as FKs da base já usam `ON DELETE CASCADE` para os dados vinculados à plaquinha.

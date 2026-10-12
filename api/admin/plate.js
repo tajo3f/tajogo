@@ -20,12 +20,9 @@ export default async function handler(req, res) {
     if (req.method === 'GET') return res.status(200).json({ ok: true, plate: mapPlate(current) });
 
     const body = readJson(req);
-
     if (req.method === 'DELETE') {
       const confirmCode = safePlateCode(body?.confirmCode);
-      if (!confirmCode || confirmCode !== current.code) {
-        return apiError(res, 400, 'DELETE_CONFIRMATION_INVALID', 'Digite o código completo da plaquinha para confirmar a exclusão.');
-      }
+      if (!confirmCode || confirmCode !== code) return apiError(res, 400, 'DELETE_CONFIRMATION_REQUIRED', 'Confirme o código exato da plaquinha para excluir.');
 
       const snapshot = {
         code: current.code,
@@ -34,18 +31,22 @@ export default async function handler(req, res) {
         status: current.status,
         setup_status: current.setup_status || null,
         configuration_locked: Boolean(current.configuration_locked),
-        owner_user_id: current.owner_user_id || null
+        scans_total: Number(current.scans_total || 0)
       };
-
-      await supabaseRest(`tap_plates?id=eq.${encodeURIComponent(current.id)}`, {
-        method: 'DELETE', headers: { Prefer: 'return=minimal' }
-      });
 
       await supabaseRest('tap_audit_logs', {
         method: 'POST', headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ actor_user_id: auth.user.id, action: 'plate.delete', entity_type: 'plate', entity_id: current.id, metadata: snapshot })
       }).catch(() => null);
 
+      if (current.current_destination_id) {
+        await supabaseRest(`tap_plates?id=eq.${encodeURIComponent(current.id)}`, {
+          method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ current_destination_id: null })
+        });
+      }
+      await supabaseRest(`tap_plates?id=eq.${encodeURIComponent(current.id)}`, {
+        method: 'DELETE', headers: { Prefer: 'return=minimal' }
+      });
       return res.status(200).json({ ok: true, deleted: { id: current.id, code: current.code } });
     }
     const patch = {};
