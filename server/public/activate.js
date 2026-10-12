@@ -215,11 +215,30 @@ export default async function handler(req, res) {
       await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
     }
 
-    if (['SUPABASE_BAD_REQUEST', 'SUPABASE_RESOURCE'].includes(code) && ['pin_validation_v4', 'activate_v4'].includes(stage)) {
+    const dbCode = String(error?.payload?.code || '');
+    const dbMessage = String(error?.payload?.message || '');
+    const rpcStage = ['pin_validation_v4', 'activate_v4'].includes(stage);
+    const rpcMissing = rpcStage && (
+      error?.status === 404 ||
+      dbCode === 'PGRST202' ||
+      dbCode === '42883' ||
+      /Could not find the function/i.test(dbMessage)
+    );
+
+    if (rpcMissing) {
       return res.status(503).json({
         ok: false,
-        error: 'ACTIVATION_DB_UPDATE_REQUIRED',
-        message: 'O módulo de ativação precisa da atualização V4.1 no Supabase. Execute a migration 004_activation_v4_and_batches.sql.',
+        error: 'ACTIVATION_RPC_NOT_AVAILABLE',
+        message: 'O Data API do Supabase ainda não encontrou o módulo de ativação. Execute a migration 006_activation_v4_3_hotfix.sql e aguarde o recarregamento do schema.',
+        reference
+      });
+    }
+
+    if (rpcStage && error?.status === 400) {
+      return res.status(503).json({
+        ok: false,
+        error: 'ACTIVATION_DATABASE_ERROR',
+        message: 'O banco encontrou uma inconsistência ao concluir a ativação. A V4.3 corrige o fluxo SQL; execute a migration 006_activation_v4_3_hotfix.sql e tente novamente.',
         reference
       });
     }
