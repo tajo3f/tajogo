@@ -21,15 +21,15 @@ Copie **todo o conteúdo**, cole no SQL Editor e execute.
 
 Ele cria:
 
-- `profiles`
-- `platform_admins`
-- `clients`
-- `client_members`
-- `plates`
-- `plate_destinations`
+- `tap_profiles`
+- `tap_platform_admins`
+- `tap_clients`
+- `tap_client_members`
+- `tap_plates`
+- `tap_plate_destinations`
 - `plate_activation_codes`
-- `scan_events`
-- `audit_logs`
+- `tap_scan_events`
+- `tap_audit_logs`
 - views administrativas
 - índices
 - triggers
@@ -99,7 +99,7 @@ Cadastre:
 SUPABASE_URL=https://SEU-PROJETO.supabase.co
 SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxxxxxxxx
 SUPABASE_SECRET_KEY=sb_secret_xxxxxxxxx
-PANEL_BASE_URL=https://painel.tajodigital.com.br
+PANEL_BASE_URL=https://go.tajodigital.com.br
 ```
 
 Marque pelo menos **Production**. Para testar Preview, marque Preview também.
@@ -179,7 +179,7 @@ https://painel.tajodigital.com.br
 
 Entre com o mesmo e-mail/senha criado no Supabase Auth.
 
-O backend valida sua conta em `platform_admins` antes de liberar a administração.
+O backend valida sua conta em `tap_platform_admins` antes de liberar a administração.
 
 ## 10. Cadastrar o primeiro cliente
 
@@ -189,7 +189,7 @@ No painel:
 Clientes → Novo cliente
 ```
 
-O registro agora é salvo em `public.clients` no Supabase.
+O registro agora é salvo em `public.tap_clients` no Supabase.
 
 ## 11. Criar a primeira plaquinha
 
@@ -205,7 +205,7 @@ O sistema salva a unidade no Supabase e retorna:
 TT-XXXXXX
 ```
 
-e um código de ativação de reserva, exibido somente naquele momento. Nesta V3 o acesso do cliente é liberado pelo vínculo em `client_members`; o PIN fica preparado para uma futura etapa de auto-reivindicação da placa.
+e um código de ativação de reserva, exibido somente naquele momento. Nesta V3 o acesso do cliente é liberado pelo vínculo em `tap_client_members`; o PIN fica preparado para uma futura etapa de auto-reivindicação da placa.
 
 O QR físico usa:
 
@@ -226,7 +226,7 @@ Escolha:
 - Localização
 - Link personalizado
 
-O sistema grava o novo destino em `plate_destinations` e atualiza `plates.current_destination_id` em uma operação transacional.
+O sistema grava o novo destino em `tap_plate_destinations` e atualiza `tap_plates.current_destination_id` em uma operação transacional.
 
 ## 13. Testar o QR em outro celular
 
@@ -254,7 +254,7 @@ Ambos usam a mesma plaquinha e o mesmo destino, mas `scan_events.source` registr
 1. Cadastre o cliente normalmente no TAJO TAP.
 2. No Supabase, crie um usuário para o cliente em **Authentication → Users**.
 3. Copie o UUID do usuário.
-4. Copie o UUID do estabelecimento em `public.clients`.
+4. Copie o UUID do estabelecimento em `public.tap_clients`.
 5. Abra `supabase/LINK_CLIENT_USER.sql`.
 6. Substitua os dois UUIDs e execute.
 
@@ -278,7 +278,7 @@ A Secret key nunca chega ao navegador.
 
 Confira nesta ordem:
 
-1. o código existe em `public.plates`?
+1. o código existe em `public.tap_plates`?
 2. o link usa `TT-` exatamente?
 3. `/api/health` está `ok: true`?
 4. `SUPABASE_URL` está correto?
@@ -291,6 +291,11 @@ Confira nesta ordem:
 Olhe o `REF:` exibido na página e abra os Runtime Logs da Vercel. O backend também envia `X-Tajo-Error` com um código resumido.
 
 
-## Correção V3.1 — tabela `profiles` já existente
+## Correção V3.2 — isolamento do backend TAJO TAP
 
-Se seu projeto Supabase já possui `public.profiles`, não apague a tabela. A migration V3.1 foi preparada para reutilizar `profiles.id = auth.users.id` e acrescentar somente os campos necessários que estiverem ausentes. Execute novamente `supabase/migrations/001_tajo_tap_backend.sql` desde o início. Os comandos foram escritos para reexecução segura nas partes de criação/trigger/policies.
+Se seu projeto Supabase já possui `public.tap_profiles`, não apague a tabela. A migration V3.1 foi preparada para reutilizar `profiles.id = auth.users.id` e acrescentar somente os campos necessários que estiverem ausentes. Execute novamente `supabase/migrations/001_tajo_tap_backend.sql` desde o início. Os comandos foram escritos para reexecução segura nas partes de criação/trigger/policies.
+
+
+# V3.3 — ativação única
+
+Depois da V3.2, execute `supabase/migrations/002_plate_self_activation.sql`. Não altere nem reaplique a `001` em produção. Em seguida publique o código V3.3. A rota limpa de ativação é `https://go.tajodigital.com.br/atv/TT-XXXXXX`.

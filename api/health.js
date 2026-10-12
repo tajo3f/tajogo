@@ -5,7 +5,7 @@ export default async function handler(_req, res) {
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   try {
     await Promise.all([
-      supabaseRest('plates?select=id&limit=1', { method: 'GET' }),
+      supabaseRest('tap_plates?select=id&limit=1', { method: 'GET' }),
       supabaseAuth('settings', { method: 'GET' })
     ]);
     return res.status(200).json({ ok: true, service: 'tajo-tap-backend', database: 'connected', auth: 'connected', runtime: process.version });

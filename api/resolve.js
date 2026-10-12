@@ -50,7 +50,7 @@ export default async function handler(req, res) {
 
   const code = safeCode(req.query.code);
   const source = req.query.source === 'nfc' ? 'nfc' : 'qr';
-  const panelBase = String(process.env.PANEL_BASE_URL || 'https://painel.tajodigital.com.br').replace(/\/+$/, '');
+  const panelBase = String(process.env.PANEL_BASE_URL || 'https://go.tajodigital.com.br').replace(/\/+$/, '');
 
   if (!code) {
     return sendHtml(res, htmlPage('Código inválido', 'O identificador desta plaquinha não possui um formato válido.', 400));
@@ -58,7 +58,7 @@ export default async function handler(req, res) {
 
   try {
     const rows = await supabaseRest(
-      `plates?code=eq.${encodeURIComponent(code)}&select=id,code,status,current_destination_id&limit=1`
+      `tap_plates?code=eq.${encodeURIComponent(code)}&select=id,code,status,current_destination_id,setup_status,configuration_locked&limit=1`
     );
     const plate = Array.isArray(rows) ? rows[0] : null;
 
@@ -66,10 +66,10 @@ export default async function handler(req, res) {
       return sendHtml(res, htmlPage('Plaquinha não encontrada', `Não encontramos a plaquinha ${code}. Confira o código ou fale com a TAJO.`, 404));
     }
 
-    if (plate.status === 'inventory' || plate.status === 'unconfigured') {
+    if ((plate.status === 'inventory' || plate.status === 'unconfigured') && !plate.configuration_locked && plate.setup_status !== 'completed') {
       res.setHeader('Cache-Control', 'no-store, max-age=0');
       res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-      return res.redirect(302, `${panelBase}/#/activate/${encodeURIComponent(code)}`);
+      return res.redirect(302, `${panelBase}/atv/${encodeURIComponent(code)}`);
     }
 
     if (plate.status === 'paused') {
@@ -86,7 +86,7 @@ export default async function handler(req, res) {
 
     // The destination must belong to this same plate as a defense-in-depth check.
     const destinations = await supabaseRest(
-      `plate_destinations?id=eq.${encodeURIComponent(plate.current_destination_id)}&plate_id=eq.${encodeURIComponent(plate.id)}&select=id,url,type,is_active&limit=1`
+      `tap_plate_destinations?id=eq.${encodeURIComponent(plate.current_destination_id)}&plate_id=eq.${encodeURIComponent(plate.id)}&select=id,url,type,is_active&limit=1`
     );
     const destination = Array.isArray(destinations) ? destinations[0] : null;
 
@@ -98,7 +98,7 @@ export default async function handler(req, res) {
     // HEAD requests are not counted to avoid false scans from bots/prefetchers.
     if (req.method === 'GET') {
       try {
-        await supabaseRest('scan_events', {
+        await supabaseRest('tap_scan_events', {
           method: 'POST',
           headers: { Prefer: 'return=minimal' },
           body: JSON.stringify({

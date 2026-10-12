@@ -28,20 +28,20 @@ export default async function handler(req, res) {
     if (!TYPES.has(type)) return apiError(res, 400, 'TYPE_INVALID', 'Tipo de destino inválido.');
     if (!url) return apiError(res, 400, 'URL_INVALID', 'Informe um endereço HTTPS válido.');
 
-    const rows = await supabaseRest(`plates?code=eq.${encodeURIComponent(code)}&select=id,client_id&limit=1`);
+    const rows = await supabaseRest(`tap_plates?code=eq.${encodeURIComponent(code)}&select=id,client_id&limit=1`);
     const plate = rows?.[0];
     if (!plate) return apiError(res, 404, 'PLATE_NOT_FOUND', 'Plaquinha não encontrada.');
     const allowed = new Set(membershipClientIds(auth));
     if (!plate.client_id || !allowed.has(plate.client_id)) return apiError(res, 403, 'PLATE_FORBIDDEN', 'Esta plaquinha não pertence à sua conta.');
 
-    await supabaseRpc('tajo_set_plate_destination', {
+    await supabaseRpc('tap_set_plate_destination', {
       p_plate_id: plate.id,
       p_type: type,
       p_url: url,
       p_label: LABELS[type],
       p_actor: auth.user.id
     });
-    const updated = await supabaseRest(`plate_admin_view?id=eq.${encodeURIComponent(plate.id)}&select=*&limit=1`);
+    const updated = await supabaseRest(`tap_plate_admin_view?id=eq.${encodeURIComponent(plate.id)}&select=*&limit=1`);
     return res.status(200).json({ ok: true, plate: mapPlate(updated?.[0]) });
   } catch (error) {
     console.error('[client/destination]', { code: publicErrorCode(error), status: error?.status, detail: error?.detail });

@@ -72,12 +72,12 @@ export async function currentUser(req, res) {
 
 export async function resolveRole(userId) {
   const admins = await supabaseRest(
-    `platform_admins?user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=role&limit=1`
+    `tap_platform_admins?user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=role&limit=1`
   );
   if (Array.isArray(admins) && admins[0]) return { role: 'admin', adminRole: admins[0].role };
 
   const memberships = await supabaseRest(
-    `client_members?user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=client_id,role&order=created_at.asc`
+    `tap_client_members?user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=client_id,role&order=created_at.asc`
   );
   if (Array.isArray(memberships) && memberships.length) {
     return { role: 'client', memberships };

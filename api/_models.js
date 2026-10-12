@@ -16,7 +16,12 @@ export function mapPlate(row) {
     qr: Number(row.qr_scans || 0),
     nfc: Number(row.nfc_scans || 0),
     createdAt: row.created_at || null,
-    activatedAt: row.activated_at || null
+    activatedAt: row.activated_at || null,
+    ownerUserId: row.owner_user_id || null,
+    setupStatus: row.setup_status || (row.status === 'active' ? 'completed' : 'pending'),
+    configurationLocked: Boolean(row.configuration_locked),
+    configuredAt: row.configured_at || null,
+    claimedAt: row.claimed_at || null
   };
 }
 

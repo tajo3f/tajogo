@@ -14,7 +14,7 @@ export default async function handler(req, res) {
     const code = safePlateCode(req.query?.code || readJson(req)?.code);
     if (!code) return apiError(res, 400, 'CODE_INVALID', 'Código de plaquinha inválido.');
 
-    const rows = await supabaseRest(`plate_admin_view?code=eq.${encodeURIComponent(code)}&select=*&limit=1`);
+    const rows = await supabaseRest(`tap_plate_admin_view?code=eq.${encodeURIComponent(code)}&select=*&limit=1`);
     const current = rows?.[0];
     if (!current) return apiError(res, 404, 'PLATE_NOT_FOUND', 'Plaquinha não encontrada.');
     if (req.method === 'GET') return res.status(200).json({ ok: true, plate: mapPlate(current) });
@@ -40,15 +40,15 @@ export default async function handler(req, res) {
     if (!Object.keys(patch).length) return apiError(res, 400, 'NOTHING_TO_UPDATE', 'Nenhuma alteração foi informada.');
     patch.updated_at = new Date().toISOString();
 
-    await supabaseRest(`plates?id=eq.${encodeURIComponent(current.id)}`, {
+    await supabaseRest(`tap_plates?id=eq.${encodeURIComponent(current.id)}`, {
       method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(patch)
     });
-    await supabaseRest('audit_logs', {
+    await supabaseRest('tap_audit_logs', {
       method: 'POST', headers: { Prefer: 'return=minimal' },
       body: JSON.stringify({ actor_user_id: auth.user.id, action: 'plate.update', entity_type: 'plate', entity_id: current.id, metadata: patch })
     }).catch(() => null);
 
-    const updated = await supabaseRest(`plate_admin_view?id=eq.${encodeURIComponent(current.id)}&select=*&limit=1`);
+    const updated = await supabaseRest(`tap_plate_admin_view?id=eq.${encodeURIComponent(current.id)}&select=*&limit=1`);
     return res.status(200).json({ ok: true, plate: mapPlate(updated?.[0]) });
   } catch (error) {
     console.error('[admin/plate]', { code: publicErrorCode(error), status: error?.status, detail: error?.detail });

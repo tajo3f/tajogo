@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     if (!auth) return;
 
     if (req.method === 'GET') {
-      const rows = await supabaseRest('client_admin_view?select=*&order=created_at.desc');
+      const rows = await supabaseRest('tap_client_admin_view?select=*&order=created_at.desc');
       return res.status(200).json({ ok: true, clients: (rows || []).map(mapClient) });
     }
 
@@ -25,7 +25,7 @@ export default async function handler(req, res) {
     if (name.length < 2) return apiError(res, 400, 'CLIENT_NAME_REQUIRED', 'Informe o nome do cliente.');
     if (email && !/^\S+@\S+\.\S+$/.test(email)) return apiError(res, 400, 'EMAIL_INVALID', 'O e-mail informado não é válido.');
 
-    const created = await supabaseRest('clients?select=*', {
+    const created = await supabaseRest('tap_clients?select=*', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
       body: JSON.stringify({
@@ -40,12 +40,12 @@ export default async function handler(req, res) {
       })
     });
     const row = Array.isArray(created) ? created[0] : null;
-    await supabaseRest('audit_logs', {
+    await supabaseRest('tap_audit_logs', {
       method: 'POST', headers: { Prefer: 'return=minimal' },
       body: JSON.stringify({ actor_user_id: auth.user.id, action: 'client.create', entity_type: 'client', entity_id: row?.id || null, metadata: { name } })
     }).catch(() => null);
 
-    const stats = await supabaseRest(`client_admin_view?id=eq.${encodeURIComponent(row.id)}&select=*&limit=1`);
+    const stats = await supabaseRest(`tap_client_admin_view?id=eq.${encodeURIComponent(row.id)}&select=*&limit=1`);
     return res.status(201).json({ ok: true, client: mapClient(stats?.[0] || row) });
   } catch (error) {
     console.error('[admin/clients]', { code: publicErrorCode(error), status: error?.status, detail: error?.detail });

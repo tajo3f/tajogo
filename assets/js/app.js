@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const CONFIG = window.TAJO_TAP_CONFIG || { primaryDomain:'tajodigital.com.br', panelDomain:'painel.tajodigital.com.br', goDomain:'go.tajodigital.com.br', platePath:'/t/' };
+  const CONFIG = window.TAJO_TAP_CONFIG || { primaryDomain:'tajodigital.com.br', panelDomain:'go.tajodigital.com.br', goDomain:'go.tajodigital.com.br', platePath:'/q/', nfcPath:'/n/', activationPath:'/atv/' };
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const app = $('#app');
@@ -48,6 +48,7 @@
   const persisted = safeParse(localStorage.getItem('tajoTapPrefs')) || {};
   const state = {
     role: null,
+    sessionRole: null,
     user: null,
     authReady: false,
     theme: persisted.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
@@ -55,7 +56,7 @@
     clients: [],
     sidebarOpen: false,
     busy: false,
-    activation: { step: 1, selected: 'google', code: '', value: '', message: '' },
+    activation: { step: 1, selected: 'google', code: '', value: '', message: '', pin: '', plate: null, loading: false, loaded: false, error: '', accountMode: 'signup', fullName: '', companyName: '', phone: '', email: '', password: '', completed: false, sessionReady: false, confirmationRequired: false },
     scanner: { stream: null, raf: null, detector: null, running: false }
   };
 
@@ -111,10 +112,13 @@
   async function bootstrap() {
     try {
       const session = await apiFetch('/api/auth/me');
-      if (session.authenticated && (session.role === 'admin' || session.role === 'client')) {
-        state.role = session.role;
+      if (session.authenticated) {
         state.user = session.user || null;
-        await refreshRoleData();
+        state.sessionRole = session.role || 'unassigned';
+        if (session.role === 'admin' || session.role === 'client') {
+          state.role = session.role;
+          await refreshRoleData();
+        }
       }
     } catch (error) {
       console.error('[TAJO TAP bootstrap]', error);
@@ -126,6 +130,8 @@
 
 
   function route() {
+    const cleanPath = location.pathname.match(/^\/atv\/(TT-[A-Za-z0-9]{6,12})\/?$/i);
+    if (cleanPath) return { name: 'activate', param: cleanPath[1].toUpperCase(), clean: true };
     const raw = location.hash.replace(/^#\/?/, '') || (state.role ? 'dashboard' : 'login');
     const parts = raw.split('/').filter(Boolean);
     return { name: parts[0] || 'login', param: decodeURIComponent(parts[1] || '') };
@@ -134,7 +140,13 @@
   function go(path) {
     state.sidebarOpen = false;
     stopScanner();
-    location.hash = '#/' + path.replace(/^\//, '');
+    const target = '#/' + path.replace(/^\//, '');
+    if (/^\/atv\//i.test(location.pathname)) {
+      history.replaceState(null, '', '/' + target);
+      render();
+      return;
+    }
+    location.hash = target;
   }
 
   function esc(v) {
@@ -322,18 +334,22 @@
   function plaqueDetail(code) {
     const p = state.plaques.find(x=>x.code===code);
     if(!p) return notFoundPage();
-    const url = `https://${CONFIG.goDomain}${CONFIG.platePath}${p.code}`;
+    const qrUrl = `https://${CONFIG.goDomain}${CONFIG.platePath}${p.code}`;
+    const nfcUrl = `https://${CONFIG.goDomain}${CONFIG.nfcPath || '/n/'}${p.code}`;
+    const activationUrl = `https://${CONFIG.goDomain}${CONFIG.activationPath || '/atv/'}${p.code}`;
+    const setupLabel = p.configurationLocked || p.setupStatus === 'completed' ? 'Configuração concluída' : 'Aguardando ativação do cliente';
     return `
-      ${pageHead('Plaquinha','Gerenciar '+esc(p.code),esc(p.name)+' · '+esc(p.client), `<button class="btn btn-ghost" data-action="copy" data-copy="${esc(url)}">${ICONS.copy} Copiar link</button><button class="btn btn-primary" data-action="edit-destination" data-code="${esc(p.code)}">${ICONS.edit} Alterar destino</button>`)}
+      ${pageHead('Plaquinha','Gerenciar '+esc(p.code),esc(p.name)+' · '+esc(p.client), `<button class="btn btn-ghost" data-action="copy" data-copy="${esc(qrUrl)}">${ICONS.copy} Copiar QR</button><button class="btn btn-primary" data-action="edit-destination" data-code="${esc(p.code)}">${ICONS.edit} Alterar destino</button>`)}
       <div class="detail-grid">
         <div class="stack">
-          <section class="card plaque-hero"><div class="row-between"><span class="badge ${p.status==='active'?'badge-success':'badge-warning'}">${p.status==='active'?'ATIVA':'STATUS: '+esc(p.status.toUpperCase())}</span><img src="assets/images/tajo-tap-mark.png" alt="" style="width:54px;background:#fff;border-radius:13px;padding:5px"></div><div><div class="plaque-code">${esc(p.code)}</div><div class="plaque-link">${esc(url)}</div></div></section>
+          <section class="card plaque-hero"><div class="row-between"><span class="badge ${p.status==='active'?'badge-success':'badge-warning'}">${p.status==='active'?'ATIVA':'STATUS: '+esc(p.status.toUpperCase())}</span><img src="assets/images/tajo-tap-mark.png" alt="" style="width:54px;background:#fff;border-radius:13px;padding:5px"></div><div><div class="plaque-code">${esc(p.code)}</div><div class="plaque-link">${esc(qrUrl)}</div></div></section>
+          <section class="card card-pad"><div class="card-title"><div><h2>Ativação do cliente</h2><p>${esc(setupLabel)}.</p></div><span class="badge ${p.configurationLocked?'badge-success':'badge-warning'}">${p.configurationLocked?'BLOQUEADA':'PENDENTE'}</span></div><div class="form-grid"><div class="field"><label>URL de ativação</label><input class="input mono" readonly value="${esc(activationUrl)}"></div><div class="field"><label>Proprietário</label><input class="input" readonly value="${esc(p.ownerUserId ? 'Conta vinculada' : 'Ainda não vinculado')}"></div></div><div class="row wrap" style="margin-top:14px"><button class="btn btn-ghost" data-action="copy" data-copy="${esc(activationUrl)}">${ICONS.copy} Copiar ativação</button></div></section>
           <section class="card card-pad"><div class="card-title"><div><h2>Destino atual</h2><p>O QR e o NFC permanecem iguais. Só o destino muda.</p></div>${statusBadge(p.status)}</div><div class="destination-option active"><div class="destination-icon">${destinationIcon(p.destinationType)}</div><div class="destination-copy"><strong>${esc(p.destinationLabel)}</strong><span>${p.destination ? esc(p.destination) : 'O cliente ainda precisa escolher um destino.'}</span></div></div><div class="row wrap" style="margin-top:16px"><button class="btn btn-primary" data-action="edit-destination" data-code="${esc(p.code)}">${ICONS.edit} Alterar destino</button><button class="btn btn-ghost" data-action="toggle-plate" data-code="${esc(p.code)}">${p.status==='paused'?'Ativar plaquinha':'Pausar plaquinha'}</button></div></section>
           <section class="metric-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">${metric('Hoje',formatNumber(p.scansToday),'Acessos','scan')}${metric('Este mês',formatNumber(p.scansMonth),'Acessos','analytics')}${metric('Total',formatNumber(p.scansTotal),'Desde ativação','dashboard')}</section>
         </div>
         <div class="stack">
-          <section class="card card-pad"><div class="card-title"><div><h2>QR da plaquinha</h2><p>Mesmo código físico, destino editável.</p></div></div><div class="qr-frame"><canvas class="qr-canvas" data-qr="${esc(url)}" width="512" height="512"></canvas></div><div class="qr-caption mono">${esc(url)}</div><div class="row wrap" style="justify-content:center;margin-top:16px"><button class="btn btn-ghost" data-action="download-qr" data-code="${esc(p.code)}">${ICONS.download} Baixar PNG</button><button class="btn btn-ghost" data-action="copy" data-copy="${esc(url)}">${ICONS.copy} Link NFC</button></div></section>
-          <section class="card card-pad"><div class="card-title"><div><h3>Origem dos acessos</h3><p>Separação pronta para QR e NFC.</p></div></div>${breakdown('QR Code',p.qr,p.scansTotal)}${breakdown('NFC / aproximação',p.nfc,p.scansTotal)}</section>
+          <section class="card card-pad"><div class="card-title"><div><h2>QR da plaquinha</h2><p>Use este QR na impressão do acrílico.</p></div></div><div class="qr-frame"><canvas class="qr-canvas" data-qr="${esc(qrUrl)}" width="512" height="512"></canvas></div><div class="qr-caption mono">${esc(qrUrl)}</div><div class="row wrap" style="justify-content:center;margin-top:16px"><button class="btn btn-ghost" data-action="download-qr" data-code="${esc(p.code)}">${ICONS.download} Baixar PNG</button><button class="btn btn-ghost" data-action="copy" data-copy="${esc(nfcUrl)}">${ICONS.wifi} Copiar NFC</button></div></section>
+          <section class="card card-pad"><div class="card-title"><div><h3>Origem dos acessos</h3><p>QR e NFC são contabilizados separadamente.</p></div></div>${breakdown('QR Code',p.qr,p.scansTotal)}${breakdown('NFC / aproximação',p.nfc,p.scansTotal)}</section>
         </div>
       </div>`;
   }
@@ -399,70 +415,212 @@
     bindPageEnhancements({name:'portal'});
   }
 
-  function renderActivation(code) {
-    const cleanCode = extractPlateCode(code);
-    state.activation.code = cleanCode;
-    if (!state.role) {
-      sessionStorage.setItem('tajoTapAfterLogin', `activate/${cleanCode}`);
-      app.innerHTML = `<main class="activate-shell"><section class="activate-card"><header class="activate-head"><img class="activate-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"><span class="badge badge-warning">ACESSO PROTEGIDO</span></header><div class="activate-body"><div class="eyebrow" style="color:var(--brand)">Plaquinha ${esc(cleanCode)}</div><h1>Entre para configurar.</h1><p>O destino de uma plaquinha só pode ser alterado por um administrador TAJO ou por um cliente previamente vinculado a ela.</p><button class="btn btn-primary" style="width:100%" data-action="activation-login">Entrar no painel ${ICONS.arrow}</button></div></section></main>`;
-      return;
-    }
-    const p = state.plaques.find(x=>x.code===cleanCode);
-    if (!p) {
-      app.innerHTML = `<main class="activate-shell"><section class="activate-card"><header class="activate-head"><img class="activate-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"><span class="badge badge-danger">INDISPONÍVEL</span></header><div class="activate-body"><div class="eyebrow" style="color:var(--brand)">${esc(cleanCode)}</div><h1>Sem permissão para configurar.</h1><p>Esta plaquinha não está vinculada à sua conta ou não foi encontrada. Se necessário, fale com a administração TAJO.</p><button class="btn btn-ghost" style="width:100%" data-action="activation-home">Voltar</button></div></section></main>`;
-      return;
-    }
-    const step=state.activation.step;
-    app.innerHTML = `<main class="activate-shell"><section class="activate-card"><header class="activate-head"><img class="activate-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"><span class="badge badge-${p.status==='unconfigured'?'warning':'success'}">${p.status==='unconfigured'?'CONFIGURAÇÃO':'ATIVA'}</span></header><div class="activate-body"><div class="eyebrow" style="color:var(--brand)">Plaquinha ${esc(p.code)}</div>${activationStep(p,step)}</div></section></main>`;
+  function resetActivation(code) {
+    state.activation = {
+      step: 1,
+      selected: 'google',
+      code,
+      value: '',
+      rawValue: '',
+      message: '',
+      pin: '',
+      plate: null,
+      loading: false,
+      loaded: false,
+      error: '',
+      accountMode: 'signup',
+      fullName: '',
+      companyName: '',
+      phone: '',
+      email: state.user?.email || '',
+      password: '',
+      completed: false,
+      sessionReady: false,
+      confirmationRequired: false
+    };
   }
 
-  function activationStep(p,step) {
-    if(step===1) return `<h1>Configure sua plaquinha.</h1><p>Escolha o que deve acontecer quando alguém escanear o QR Code ou aproximar o celular.</p><div class="steps"><span class="step active"></span><span class="step"></span><span class="step"></span></div><div class="choice-grid">${destinationChoices()}</div><button class="btn btn-primary" style="width:100%" data-action="activation-next">Continuar ${ICONS.arrow}</button>`;
-    if(step===2) return `<h1>Agora, informe o destino.</h1><p>Vamos usar esta informação para redirecionar os acessos da sua plaquinha.</p><div class="steps"><span class="step active"></span><span class="step active"></span><span class="step"></span></div>${destinationField(state.activation.selected)}<div class="row" style="margin-top:22px"><button class="btn btn-ghost" data-action="activation-back">Voltar</button><button class="btn btn-primary" style="flex:1" data-action="activation-next">Revisar configuração ${ICONS.arrow}</button></div>`;
-    return `<div style="width:68px;height:68px;border-radius:22px;background:var(--brand);display:grid;place-items:center;color:#111">${ICONS.check}</div><h1>Pronto para ativar.</h1><p>Depois de concluir, a mesma plaquinha poderá ter o destino alterado pelo painel do cliente sem reimpressão.</p><div class="steps"><span class="step active"></span><span class="step active"></span><span class="step active"></span></div><div class="destination-option active" style="background:#172216;border-color:#335631"><div class="destination-icon">${destinationIcon(state.activation.selected)}</div><div class="destination-copy"><strong>${destinationName(state.activation.selected)}</strong><span>Plaquinha ${esc(p.code)}</span></div></div><button class="btn btn-primary" style="width:100%;margin-top:22px" data-action="activation-complete">Concluir e ativar</button>`;
+  async function loadActivationPlate(code) {
+    state.activation.loading = true;
+    state.activation.error = '';
+    render();
+    try {
+      const out = await apiFetch(`/api/public/activate?code=${encodeURIComponent(code)}`);
+      state.activation.plate = out.plate || null;
+      state.activation.loaded = true;
+    } catch (error) {
+      state.activation.error = error.message || 'Não foi possível consultar esta plaquinha.';
+      state.activation.loaded = true;
+    } finally {
+      state.activation.loading = false;
+      render();
+    }
+  }
+
+  function activationProgress(step) {
+    return `<div class="activation-progress" aria-label="Etapa ${step} de 4"><span class="${step>=1?'active':''}"></span><span class="${step>=2?'active':''}"></span><span class="${step>=3?'active':''}"></span><span class="${step>=4?'active':''}"></span></div>`;
+  }
+
+  function activationShell(content, badge = 'ATIVAÇÃO SEGURA', badgeType = 'warning') {
+    return `<main class="activate-shell"><section class="activate-card"><header class="activate-head"><img class="activate-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"><span class="badge badge-${badgeType}">${badge}</span></header><div class="activate-body">${content}</div></section></main>`;
+  }
+
+  function renderActivation(code) {
+    const cleanCode = extractPlateCode(code);
+    if (!/^TT-[A-Z0-9]{6,12}$/.test(cleanCode)) {
+      app.innerHTML = activationShell(`<div class="eyebrow" style="color:var(--brand)">TAJO TAP</div><h1>Link de ativação inválido.</h1><p>Confira o endereço da plaquinha ou fale com o suporte TAJO.</p><button class="btn btn-ghost" style="width:100%" data-action="activation-home">Ir para o painel</button>`, 'LINK INVÁLIDO', 'danger');
+      return;
+    }
+
+    if (state.activation.code !== cleanCode) resetActivation(cleanCode);
+    if (!state.activation.loaded && !state.activation.loading) {
+      loadActivationPlate(cleanCode);
+      app.innerHTML = activationShell(`<div class="eyebrow" style="color:var(--brand)">Plaquinha ${esc(cleanCode)}</div><h1>Verificando sua TAJO TAP…</h1><p>Estamos validando o código e preparando a ativação segura.</p><div class="activation-loader" aria-hidden="true"></div>`, 'VERIFICANDO', 'muted');
+      return;
+    }
+    if (state.activation.loading) {
+      app.innerHTML = activationShell(`<div class="eyebrow" style="color:var(--brand)">Plaquinha ${esc(cleanCode)}</div><h1>Verificando sua TAJO TAP…</h1><p>Estamos validando o código e preparando a ativação segura.</p><div class="activation-loader" aria-hidden="true"></div>`, 'VERIFICANDO', 'muted');
+      return;
+    }
+    if (state.activation.error || !state.activation.plate) {
+      app.innerHTML = activationShell(`<div class="eyebrow" style="color:var(--brand)">${esc(cleanCode)}</div><h1>Não foi possível iniciar a ativação.</h1><p>${esc(state.activation.error || 'Esta plaquinha não foi encontrada.')}</p><button class="btn btn-primary" style="width:100%" data-action="activation-retry">Tentar novamente ${ICONS.arrow}</button>`, 'INDISPONÍVEL', 'danger');
+      return;
+    }
+
+    const plate = state.activation.plate;
+    if (plate.configured && !state.activation.completed) {
+      app.innerHTML = activationShell(`<div class="activation-success-icon">${ICONS.check}</div><div class="eyebrow" style="color:var(--brand)">Plaquinha ${esc(cleanCode)}</div><h1>Esta plaquinha já foi ativada.</h1><p>A configuração inicial é feita apenas uma vez. Para alterar o destino, entre na sua conta TAJO TAP.</p><div class="activation-summary"><div><span>Status</span><strong>Ativa</strong></div><div><span>Código</span><strong class="mono">${esc(cleanCode)}</strong></div></div><button class="btn btn-primary" style="width:100%;margin-top:22px" data-action="activation-home">Entrar no painel ${ICONS.arrow}</button>`, 'JÁ ATIVADA', 'success');
+      return;
+    }
+    if (!plate.available && !state.activation.completed) {
+      app.innerHTML = activationShell(`<div class="eyebrow" style="color:var(--brand)">${esc(cleanCode)}</div><h1>Ativação indisponível.</h1><p>Esta unidade existe, mas não está liberada para configuração neste momento. Fale com a TAJO para verificar o status.</p><button class="btn btn-ghost" style="width:100%" data-action="activation-home">Ir para o painel</button>`, 'INDISPONÍVEL', 'danger');
+      return;
+    }
+
+    if (state.activation.completed) {
+      const destination = state.activation.value;
+      const loginText = state.activation.confirmationRequired ? 'Confirmar e-mail / entrar' : 'Abrir minhas plaquinhas';
+      app.innerHTML = activationShell(`<div class="activation-success-icon">${ICONS.check}</div><div class="eyebrow" style="color:var(--brand)">${esc(cleanCode)}</div><h1>Sua TAJO TAP está ativa.</h1><p>O QR Code físico já está direcionando para o destino escolhido. A configuração pública desta plaquinha foi encerrada.</p><div class="activation-summary"><div><span>Destino</span><strong>${esc(destinationName(state.activation.selected))}</strong></div><div><span>Configuração</span><strong>Concluída e bloqueada</strong></div></div>${state.activation.confirmationRequired?'<div class="activation-notice">Enviamos a confirmação de cadastro conforme a configuração de autenticação do projeto. Após confirmar o e-mail, entre normalmente no painel.</div>':''}<div class="row activation-actions"><a class="btn btn-ghost" href="${esc(destination)}" target="_blank" rel="noopener noreferrer">Testar destino</a><button class="btn btn-primary" data-action="activation-finish">${loginText} ${ICONS.arrow}</button></div>`, 'ATIVA', 'success');
+      return;
+    }
+
+    app.innerHTML = activationShell(`<div class="activation-topline"><div><div class="eyebrow" style="color:var(--brand)">Ativação única</div><strong class="mono">${esc(cleanCode)}</strong></div><span class="activation-step-label">Etapa ${state.activation.step}/4</span></div>${activationProgress(state.activation.step)}${activationStep(plate, state.activation.step)}`);
+  }
+
+  function activationStep(plate, step) {
+    if (step === 1) {
+      return `<div class="activation-hero"><div class="activation-plate-mark">${ICONS.wifi}</div><h1>Ative sua plaquinha.</h1><p>Você vai vincular esta TAJO TAP à sua conta e escolher para onde seus clientes serão direcionados.</p></div><div class="activation-feature-list"><div>${ICONS.check}<span><strong>QR Code permanente</strong><small>O impresso no acrílico não precisa ser trocado.</small></span></div><div>${ICONS.check}<span><strong>Configuração inicial única</strong><small>Depois da confirmação, este link público será bloqueado.</small></span></div><div>${ICONS.check}<span><strong>Controle pelo painel</strong><small>Futuras alterações são feitas com login.</small></span></div></div><button class="btn btn-primary" style="width:100%;margin-top:24px" data-action="activation-next">Começar ativação ${ICONS.arrow}</button>`;
+    }
+
+    if (step === 2) {
+      if (state.user) {
+        return `<h1>Identifique seu negócio.</h1><p>Sua conta já está autenticada como <strong>${esc(state.user.email || state.user.name || 'usuário')}</strong>. Agora informe o estabelecimento que usará esta plaquinha.</p><div class="activation-account-ok">${ICONS.check}<div><strong>Conta conectada</strong><span>${esc(state.user.email || '')}</span></div></div><div class="form-grid"><div class="field"><label for="activation-company">Estabelecimento</label><input id="activation-company" class="input" value="${esc(state.activation.companyName)}" autocomplete="organization" placeholder="Ex.: Restaurante Central" required></div><div class="field"><label for="activation-phone">WhatsApp</label><input id="activation-phone" class="input" value="${esc(state.activation.phone)}" inputmode="tel" autocomplete="tel" placeholder="(27) 99999-9999"></div></div><div class="row activation-actions"><button class="btn btn-ghost" data-action="activation-back">Voltar</button><button class="btn btn-primary" style="flex:1" data-action="activation-next">Continuar ${ICONS.arrow}</button></div>`;
+      }
+
+      const tabs = `<div class="activation-tabs"><button class="${state.activation.accountMode==='signup'?'active':''}" data-action="activation-account-mode" data-mode="signup">Criar minha conta</button><button class="${state.activation.accountMode==='existing'?'active':''}" data-action="activation-account-mode" data-mode="existing">Já tenho uma conta</button></div>`;
+      if (state.activation.accountMode === 'existing') {
+        return `<h1>Entre na sua conta.</h1><p>Use seu acesso TAJO TAP. Depois do login, esta plaquinha será vinculada ao seu negócio.</p>${tabs}<form id="activation-existing-login-form" class="stack"><div class="form-grid"><div class="field"><label>E-mail</label><input class="input" name="email" type="email" autocomplete="email" value="${esc(state.activation.email)}" required></div><div class="field"><label>Senha</label><input class="input" name="password" type="password" autocomplete="current-password" minlength="8" required></div></div><div class="form-grid"><div class="field"><label>Estabelecimento</label><input class="input" name="company" autocomplete="organization" value="${esc(state.activation.companyName)}" required></div><div class="field"><label>WhatsApp</label><input class="input" name="phone" inputmode="tel" autocomplete="tel" value="${esc(state.activation.phone)}"></div></div><div class="row activation-actions"><button type="button" class="btn btn-ghost" data-action="activation-back">Voltar</button><button class="btn btn-primary" style="flex:1" type="submit">Entrar e continuar ${ICONS.arrow}</button></div></form>`;
+      }
+
+      return `<h1>Crie seu acesso.</h1><p>Essa conta será a proprietária da plaquinha e permitirá alterar o destino futuramente pelo painel.</p>${tabs}<div class="stack"><div class="form-grid"><div class="field"><label for="activation-name">Seu nome</label><input id="activation-name" class="input" value="${esc(state.activation.fullName)}" autocomplete="name" placeholder="Nome do responsável"></div><div class="field"><label for="activation-company">Estabelecimento</label><input id="activation-company" class="input" value="${esc(state.activation.companyName)}" autocomplete="organization" placeholder="Nome da empresa"></div></div><div class="form-grid"><div class="field"><label for="activation-email">E-mail</label><input id="activation-email" class="input" type="email" value="${esc(state.activation.email)}" autocomplete="email" placeholder="voce@empresa.com.br"></div><div class="field"><label for="activation-phone">WhatsApp</label><input id="activation-phone" class="input" value="${esc(state.activation.phone)}" inputmode="tel" autocomplete="tel" placeholder="(27) 99999-9999"></div></div><div class="field"><label for="activation-password">Crie uma senha</label><input id="activation-password" class="input" type="password" autocomplete="new-password" minlength="8" placeholder="Mínimo de 8 caracteres"><span class="field-help">Use uma senha exclusiva. A TAJO nunca solicita sua senha por WhatsApp.</span></div></div><div class="row activation-actions"><button class="btn btn-ghost" data-action="activation-back">Voltar</button><button class="btn btn-primary" style="flex:1" data-action="activation-next">Continuar ${ICONS.arrow}</button></div>`;
+    }
+
+    if (step === 3) {
+      return `<h1>Defina o destino.</h1><p>Digite o PIN entregue com a plaquinha e escolha o link que será aberto após o scan.</p><div class="field activation-pin-field"><label for="activation-pin">PIN de ativação</label><input id="activation-pin" class="input mono" inputmode="numeric" autocomplete="one-time-code" maxlength="6" value="${esc(state.activation.pin)}" placeholder="000000"><span class="field-help">Após 5 tentativas incorretas, a ativação é bloqueada temporariamente.</span></div><div class="choice-grid activation-choice-grid">${destinationChoices()}</div>${destinationField(state.activation.selected)}<div class="row activation-actions"><button class="btn btn-ghost" data-action="activation-back">Voltar</button><button class="btn btn-primary" style="flex:1" data-action="activation-next">Revisar ativação ${ICONS.arrow}</button></div>`;
+    }
+
+    return `<h1>Revise antes de ativar.</h1><p>Confira os dados. Ao confirmar, esta configuração pública será encerrada e futuras mudanças exigirão login.</p><div class="activation-review"><div><span>Plaquinha</span><strong class="mono">${esc(plate.code)}</strong></div><div><span>Estabelecimento</span><strong>${esc(state.activation.companyName)}</strong></div><div><span>Destino</span><strong>${esc(destinationName(state.activation.selected))}</strong></div><div class="activation-review-url"><span>Link</span><strong>${esc(state.activation.value)}</strong></div></div><label class="activation-consent"><input id="activation-confirm" type="checkbox"><span>Entendo que a ativação inicial é única. Depois de concluir, alterações serão feitas pelo painel autenticado.</span></label><div class="row activation-actions"><button class="btn btn-ghost" data-action="activation-back">Voltar e revisar</button><button class="btn btn-primary" style="flex:1" data-action="activation-complete">Confirmar e ativar ${ICONS.check}</button></div>`;
   }
 
   function destinationChoices() {
-    const items=[['google','Avaliações Google','Leve o cliente direto para avaliar.'],['whatsapp','WhatsApp','Abra uma conversa pronta.'],['instagram','Instagram','Direcione para o perfil da empresa.'],['smart','Smart Page','Uma página com vários botões.'],['map','Localização','Abra a rota no mapa.'],['custom','Outro link','Use qualquer endereço HTTPS.']];
+    const items = [
+      ['google','Avaliações Google','Leve o cliente direto para avaliar.'],
+      ['whatsapp','WhatsApp','Abra uma conversa pronta.'],
+      ['instagram','Instagram','Direcione para o perfil da empresa.'],
+      ['smart','Site / Cardápio','Abra seu site, catálogo ou cardápio.'],
+      ['map','Localização','Abra uma rota ou endereço no mapa.'],
+      ['custom','Outro link','Use qualquer endereço HTTPS.']
+    ];
     return items.map(([id,name,desc])=>`<button class="choice ${state.activation.selected===id?'active':''}" data-action="activation-choice" data-choice="${id}">${destinationIcon(id)}<strong>${name}</strong><span>${desc}</span></button>`).join('');
   }
+
   function destinationField(type) {
-    if(type==='whatsapp') return `<div class="stack"><div class="field"><label>WhatsApp</label><input id="activation-value" class="input" inputmode="tel" placeholder="(27) 99999-9999"></div><div class="field"><label>Mensagem inicial <span class="text-muted">(opcional)</span></label><textarea id="activation-message" class="textarea" placeholder="Olá! Vim pela plaquinha..."></textarea></div></div>`;
-    if(type==='google') return `<div class="field"><label>Link de avaliação do Google</label><input id="activation-value" class="input" type="url" placeholder="https://g.page/r/.../review"><span class="field-help">Cole o link HTTPS de avaliação do estabelecimento.</span></div>`;
-    return `<div class="field"><label>${destinationName(type)}</label><input id="activation-value" class="input" type="url" placeholder="https://"><span class="field-help">Informe um endereço HTTPS válido.</span></div>`;
+    const raw = esc(state.activation.rawValue || '');
+    if (type === 'whatsapp') return `<div class="stack"><div class="field"><label>WhatsApp de destino</label><input id="activation-value" class="input" inputmode="tel" value="${raw}" placeholder="(27) 99999-9999"></div><div class="field"><label>Mensagem inicial <span class="text-muted">(opcional)</span></label><textarea id="activation-message" class="textarea" placeholder="Olá! Vim pela plaquinha...">${esc(state.activation.message || '')}</textarea></div></div>`;
+    if (type === 'google') return `<div class="field"><label>Link de avaliação do Google</label><input id="activation-value" class="input" type="url" value="${raw}" placeholder="https://g.page/r/.../review"><span class="field-help">Cole o link HTTPS de avaliação do estabelecimento.</span></div>`;
+    return `<div class="field"><label>${destinationName(type)}</label><input id="activation-value" class="input" type="url" value="${raw}" placeholder="https://"><span class="field-help">Informe um endereço HTTPS válido.</span></div>`;
   }
-  function destinationName(type) { return ({google:'Avaliações Google',whatsapp:'WhatsApp',instagram:'Instagram',smart:'Smart Page',map:'Localização',custom:'Link personalizado'}[type]||'Destino'); }
+
+  function destinationName(type) {
+    return ({ google:'Avaliações Google', whatsapp:'WhatsApp', instagram:'Instagram', smart:'Site / Cardápio', map:'Localização', custom:'Link personalizado' }[type] || 'Destino');
+  }
 
   function userInitials() {
     const name=String(state.user?.name||'TAJO').trim();
     return name.split(/\s+/).slice(0,2).map(x=>x[0]||'').join('').toUpperCase() || 'TJ';
   }
 
-  function normalizeActivationDestination() {
-    const raw=String($('#activation-value')?.value||'').trim();
-    if(state.activation.selected==='whatsapp') {
-      const digits=raw.replace(/\D/g,'');
-      if(digits.length < 10) throw new Error('Informe um WhatsApp válido.');
-      const phone=digits.startsWith('55')?digits:`55${digits}`;
-      const message=String($('#activation-message')?.value||'').trim();
-      return `https://wa.me/${phone}${message?`?text=${encodeURIComponent(message)}`:''}`;
+  function captureActivationAccount() {
+    if (state.user) {
+      state.activation.companyName = String($('#activation-company')?.value || state.activation.companyName || '').trim();
+      state.activation.phone = String($('#activation-phone')?.value || state.activation.phone || '').trim();
+      if (state.activation.companyName.length < 2) throw new Error('Informe o nome do estabelecimento.');
+      return;
     }
-    try { const u=new URL(raw); if(u.protocol!=='https:') throw new Error(); return u.toString(); }
-    catch { throw new Error('Informe um endereço HTTPS válido.'); }
+    if (state.activation.accountMode === 'existing') throw new Error('Entre com sua conta antes de continuar.');
+    state.activation.fullName = String($('#activation-name')?.value || '').trim();
+    state.activation.companyName = String($('#activation-company')?.value || '').trim();
+    state.activation.email = String($('#activation-email')?.value || '').trim().toLowerCase();
+    state.activation.phone = String($('#activation-phone')?.value || '').trim();
+    state.activation.password = String($('#activation-password')?.value || '');
+    if (state.activation.fullName.length < 2) throw new Error('Informe seu nome.');
+    if (state.activation.companyName.length < 2) throw new Error('Informe o nome do estabelecimento.');
+    if (!/^\S+@\S+\.\S+$/.test(state.activation.email)) throw new Error('Informe um e-mail válido.');
+    if (state.activation.password.length < 8) throw new Error('Crie uma senha com pelo menos 8 caracteres.');
+  }
+
+  function normalizeActivationDestination(rawInput, messageInput = '') {
+    const raw = String(rawInput || '').trim();
+    if (state.activation.selected === 'whatsapp') {
+      const digits = raw.replace(/\D/g, '');
+      if (digits.length < 10) throw new Error('Informe um WhatsApp válido.');
+      const phone = digits.startsWith('55') ? digits : `55${digits}`;
+      const message = String(messageInput || '').trim();
+      return `https://wa.me/${phone}${message ? `?text=${encodeURIComponent(message)}` : ''}`;
+    }
+    try {
+      const u = new URL(raw);
+      if (u.protocol !== 'https:' || !u.hostname || u.username || u.password) throw new Error();
+      return u.toString();
+    } catch {
+      throw new Error('Informe um endereço HTTPS válido.');
+    }
+  }
+
+  function captureActivationDestination() {
+    state.activation.pin = String($('#activation-pin')?.value || state.activation.pin || '').replace(/\D/g, '').slice(0, 6);
+    state.activation.rawValue = String($('#activation-value')?.value || state.activation.rawValue || '').trim();
+    state.activation.message = String($('#activation-message')?.value || state.activation.message || '').trim();
+    if (!/^\d{6}$/.test(state.activation.pin)) throw new Error('Informe os seis números do PIN de ativação.');
+    state.activation.value = normalizeActivationDestination(state.activation.rawValue, state.activation.message);
   }
 
   function showCreatedPlate(plate, activationCode) {
-    const url=`https://${CONFIG.goDomain}${CONFIG.platePath}${plate.code}`;
-    showModal(`<div class="modal-head"><div><div class="eyebrow">Plaquinha criada</div><h2>${esc(plate.code)}</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body stack"><div class="destination-option active"><div class="destination-icon">${ICONS.check}</div><div class="destination-copy"><strong>Registro salvo no Supabase</strong><span>Agora este código pode ser aberto em qualquer aparelho.</span></div></div><div class="form-grid"><div class="field"><label>Link físico</label><input class="input mono" readonly value="${esc(url)}"></div><div class="field"><label>Código de ativação</label><input class="input mono" readonly value="${esc(activationCode||'—')}"><span class="field-help">Guarde este código. Por segurança, ele é exibido somente na criação.</span></div></div><div class="qr-frame" style="width:220px;margin:auto"><canvas class="qr-canvas" data-qr="${esc(url)}" width="440" height="440"></canvas></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="copy" data-copy="${esc(url)}">${ICONS.copy} Copiar link</button><button class="btn btn-primary" data-action="close-modal">Concluir</button></div>`);
+    const qrUrl = `https://${CONFIG.goDomain}${CONFIG.platePath}${plate.code}`;
+    const nfcUrl = `https://${CONFIG.goDomain}${CONFIG.nfcPath || '/n/'}${plate.code}`;
+    const activationUrl = `https://${CONFIG.goDomain}${CONFIG.activationPath || '/atv/'}${plate.code}`;
+    showModal(`<div class="modal-head"><div><div class="eyebrow">Plaquinha criada</div><h2>${esc(plate.code)}</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body stack"><div class="destination-option active"><div class="destination-icon">${ICONS.check}</div><div class="destination-copy"><strong>Pronta para produção</strong><span>O QR e o NFC são permanentes. Enquanto estiver pendente, ambos conduzem o cliente para a ativação.</span></div></div><div class="form-grid"><div class="field"><label>Link do QR Code</label><input class="input mono" readonly value="${esc(qrUrl)}"></div><div class="field"><label>Link do NFC</label><input class="input mono" readonly value="${esc(nfcUrl)}"></div></div><div class="form-grid"><div class="field"><label>Página de ativação</label><input class="input mono" readonly value="${esc(activationUrl)}"></div><div class="field"><label>PIN de ativação</label><input class="input mono activation-pin-output" readonly value="${esc(activationCode||'—')}"><span class="field-help">Entregue este PIN junto com a plaquinha. Ele é exibido somente na criação.</span></div></div><div class="qr-frame" style="width:220px;margin:auto"><canvas class="qr-canvas" data-qr="${esc(qrUrl)}" width="440" height="440"></canvas></div><div class="activation-notice"><strong>Fluxo:</strong> QR/NFC → <span class="mono">/atv/${esc(plate.code)}</span> enquanto pendente → destino final depois da ativação.</div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="copy" data-copy="${esc(activationUrl)}">${ICONS.copy} Copiar ativação</button><button class="btn btn-ghost" data-action="copy" data-copy="${esc(nfcUrl)}">${ICONS.wifi} Copiar NFC</button><button class="btn btn-primary" data-action="close-modal">Concluir</button></div>`);
     renderQRCodes();
   }
 
   function newPlaqueModal() {
     const generated = generateCode();
-    const url=`https://${CONFIG.goDomain}${CONFIG.platePath}${generated}`;
+    const qrUrl = `https://${CONFIG.goDomain}${CONFIG.platePath}${generated}`;
+    const nfcUrl = `https://${CONFIG.goDomain}${CONFIG.nfcPath || '/n/'}${generated}`;
+    const activationUrl = `https://${CONFIG.goDomain}${CONFIG.activationPath || '/atv/'}${generated}`;
     showModal(`
       <div class="modal-head"><div><div class="eyebrow">Produção</div><h2>Nova plaquinha</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal" aria-label="Fechar">${ICONS.close}</button></div>
-      <form id="new-plaque-form"><div class="modal-body stack"><div class="form-grid"><div class="field"><label>Nome interno</label><input class="input" name="name" placeholder="Ex.: Balcão principal" required></div><div class="field"><label>Cliente</label><select class="select" name="client"><option value="">Ainda não vinculado</option>${state.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div></div><div class="form-grid"><div class="field"><label>Código gerado</label><input class="input mono" name="code" value="${generated}" readonly></div><div class="field"><label>Link físico</label><input class="input mono" value="${url}" readonly></div></div><div class="card card-pad" style="box-shadow:none;background:var(--surface-2)"><div class="row-between mobile-stack"><div><strong>QR padronizado TAJO TAP</strong><div class="text-muted" style="font-size:.8rem">Este é o link que também pode ser gravado na tag NFC.</div></div><div class="qr-frame" style="width:180px;margin:0"><canvas class="qr-canvas" data-qr="${url}" width="360" height="360"></canvas></div></div></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary" type="submit">Criar plaquinha ${ICONS.arrow}</button></div></form>`, true);
+      <form id="new-plaque-form"><div class="modal-body stack"><div class="form-grid"><div class="field"><label>Nome interno</label><input class="input" name="name" placeholder="Ex.: Balcão principal" required></div><div class="field"><label>Cliente <span class="text-muted">(opcional)</span></label><select class="select" name="client"><option value="">Será vinculado na ativação</option>${state.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div></div><div class="form-grid"><div class="field"><label>Código gerado</label><input class="input mono" name="code" value="${generated}" readonly></div><div class="field"><label>Página de ativação</label><input class="input mono" value="${activationUrl}" readonly></div></div><div class="form-grid"><div class="field"><label>QR impresso</label><input class="input mono" value="${qrUrl}" readonly></div><div class="field"><label>NFC gravado</label><input class="input mono" value="${nfcUrl}" readonly></div></div><div class="card card-pad" style="box-shadow:none;background:var(--surface-2)"><div class="row-between mobile-stack"><div><strong>QR permanente TAJO TAP</strong><div class="text-muted" style="font-size:.8rem">Imprima este QR no acrílico. Ele não muda depois que o cliente ativa a plaquinha.</div></div><div class="qr-frame" style="width:180px;margin:0"><canvas class="qr-canvas" data-qr="${qrUrl}" width="360" height="360"></canvas></div></div></div><div class="activation-notice">Na primeira leitura, o motor envia automaticamente para <span class="mono">/atv/${generated}</span>. Depois da ativação, o mesmo QR redireciona ao destino do cliente.</div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary" type="submit">Criar plaquinha ${ICONS.arrow}</button></div></form>`, true);
     renderQRCodes();
   }
 
@@ -613,7 +771,7 @@
     if(routeEl){ e.preventDefault(); go(routeEl.dataset.route); return; }
     const actionEl=e.target.closest('[data-action]'); if(!actionEl) return;
     const action=actionEl.dataset.action;
-    if(action==='logout'||action==='portal-exit'){ try{await apiFetch('/api/auth/logout',{method:'POST'});}catch{} state.role=null;state.user=null;state.plaques=[];state.clients=[];go('login'); }
+    if(action==='logout'||action==='portal-exit'){ try{await apiFetch('/api/auth/logout',{method:'POST'});}catch{} state.role=null;state.sessionRole=null;state.user=null;state.plaques=[];state.clients=[];go('login'); }
     if(action==='toggle-sidebar'){state.sidebarOpen=!state.sidebarOpen;render();}
     if(action==='close-sidebar'){state.sidebarOpen=false;render();}
     if(action==='theme'){setTheme(state.theme==='dark'?'light':'dark');render();}
@@ -630,23 +788,79 @@
     if(action==='toggle-plate') { const p=state.plaques.find(x=>x.code===actionEl.dataset.code); if(p&&state.role==='admin'){ try{ const target=p.status==='paused'?'active':'paused'; const out=await apiFetch(`/api/admin/plate?code=${encodeURIComponent(p.code)}`,{method:'PATCH',body:{status:target}}); Object.assign(p,out.plate); toast('Status atualizado'); render(); }catch(err){ toast('Não foi possível atualizar',err.message); } } }
     if(action==='go-plaques') go('plaques');
     if(action==='go-analytics') go('analytics');
-    if(action==='activation-login'){go('login');}
-    if(action==='activation-home'){go(state.role==='admin'?'dashboard':'portal');}
-    if(action==='activation-choice'){state.activation.selected=actionEl.dataset.choice;render();}
-    if(action==='activation-next'){ if(state.activation.step===2){ try{state.activation.value=normalizeActivationDestination();}catch(err){toast('Revise o destino',err.message);return;} } state.activation.step=Math.min(3,state.activation.step+1);render();}
-    if(action==='activation-back'){state.activation.step=Math.max(1,state.activation.step-1);render();}
-    if(action==='activation-complete'){
-      const p=state.plaques.find(x=>x.code===state.activation.code); if(!p) return;
-      try {
-        const endpoint=state.role==='admin'?'/api/admin/destination':'/api/client/destination';
-        const out=await apiFetch(endpoint,{method:'POST',body:{code:p.code,type:state.activation.selected,url:state.activation.value}});
-        Object.assign(p,out.plate); state.activation.step=1;state.activation.value=''; toast('Plaquinha ativada','O destino foi salvo no backend.'); go(state.role==='admin'?`plaque/${p.code}`:'portal');
-      } catch(err) { toast('Não foi possível ativar',err.message); }
+    if(action==='activation-home'){ go(state.role==='admin'?'dashboard':state.role==='client'?'portal':'login'); }
+    if(action==='activation-retry'){ state.activation.loaded=false;state.activation.error='';state.activation.plate=null;render(); }
+    if(action==='activation-account-mode'){ state.activation.accountMode=actionEl.dataset.mode==='existing'?'existing':'signup';render(); }
+    if(action==='activation-choice'){
+      state.activation.pin=String($('#activation-pin')?.value||state.activation.pin||'').replace(/\D/g,'').slice(0,6);
+      state.activation.selected=actionEl.dataset.choice;
+      state.activation.rawValue='';
+      state.activation.value='';
+      state.activation.message='';
+      render();
     }
+    if(action==='activation-next'){
+      try {
+        if(state.activation.step===2) captureActivationAccount();
+        if(state.activation.step===3) captureActivationDestination();
+        state.activation.step=Math.min(4,state.activation.step+1);
+        render();
+      } catch(err){ toast('Revise os dados',err.message); }
+    }
+    if(action==='activation-back'){ state.activation.step=Math.max(1,state.activation.step-1);render(); }
+    if(action==='activation-complete'){
+      if(state.busy) return;
+      if(!$('#activation-confirm')?.checked){ toast('Confirmação necessária','Marque a confirmação antes de ativar.'); return; }
+      state.busy=true; actionEl.disabled=true;
+      try {
+        const out=await apiFetch('/api/public/activate',{method:'POST',body:{
+          code:state.activation.code,
+          pin:state.activation.pin,
+          mode:state.user?'existing':'signup',
+          fullName:state.activation.fullName,
+          companyName:state.activation.companyName,
+          phone:state.activation.phone,
+          email:state.activation.email,
+          password:state.activation.password,
+          type:state.activation.selected,
+          url:state.activation.value
+        }});
+        state.activation.completed=true;
+        state.activation.sessionReady=Boolean(out.sessionReady);
+        state.activation.confirmationRequired=Boolean(out.emailConfirmationRequired);
+        if(out.sessionReady){
+          const session=await apiFetch('/api/auth/me');
+          state.user=session.user||state.user;
+          state.sessionRole=session.role||state.sessionRole;
+          if(session.role==='admin'||session.role==='client'){state.role=session.role;await refreshRoleData();}
+        }
+        toast('Plaquinha ativada','O QR Code já está direcionando para o destino escolhido.');
+        render();
+      } catch(err) {
+        if(err.code==='ACCOUNT_EXISTS'||err.code==='ACCOUNT_EXISTS_OR_INVALID'){ state.activation.accountMode='existing';state.activation.step=2; }
+        if(['PIN_INVALID','PIN_LOCKED','PIN_EXPIRED','PIN_USED'].includes(err.code)){ state.activation.step=3; }
+        toast('Não foi possível ativar',err.message);
+        render();
+      } finally { state.busy=false; }
+    }
+    if(action==='activation-finish'){ go(state.role==='admin'?'dashboard':state.role==='client'?'portal':'login'); }
   });
 
   document.addEventListener('submit', async (e) => {
-    if(e.target.id==='login-form') { e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target); try{ const out=await apiFetch('/api/auth/login',{method:'POST',body:{email:fd.get('email'),password:fd.get('password')}}); state.role=out.role;state.user=out.user||null;await refreshRoleData(); const after=sessionStorage.getItem('tajoTapAfterLogin');sessionStorage.removeItem('tajoTapAfterLogin'); if(after) go(after); else go(state.role==='admin'?'dashboard':'portal'); }catch(err){toast('Não foi possível entrar',err.message);} }
+    if(e.target.id==='login-form') { e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target); try{ const out=await apiFetch('/api/auth/login',{method:'POST',body:{email:fd.get('email'),password:fd.get('password')}}); state.role=out.role;state.sessionRole=out.role;state.user=out.user||null;await refreshRoleData(); const after=sessionStorage.getItem('tajoTapAfterLogin');sessionStorage.removeItem('tajoTapAfterLogin'); if(after) go(after); else go(state.role==='admin'?'dashboard':'portal'); }catch(err){toast('Não foi possível entrar',err.message);} }
+    if(e.target.id==='activation-existing-login-form'){
+      e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target);
+      state.activation.email=String(fd.get('email')||'').trim().toLowerCase();
+      state.activation.companyName=String(fd.get('company')||'').trim();
+      state.activation.phone=String(fd.get('phone')||'').trim();
+      if(state.activation.companyName.length<2){toast('Revise os dados','Informe o nome do estabelecimento.');return;}
+      try {
+        const out=await apiFetch('/api/public/activation-login',{method:'POST',body:{email:state.activation.email,password:fd.get('password')}});
+        state.user=out.user||null;state.sessionRole=out.role||'unassigned';
+        if(out.role==='admin'||out.role==='client'){state.role=out.role;await refreshRoleData();}
+        toast('Conta conectada','Agora você pode continuar a ativação.');render();
+      } catch(err){toast('Não foi possível entrar',err.message);}
+    }
     if(e.target.id==='manual-scan-form'){e.preventDefault();handleScannedValue(new FormData(e.target).get('code'));}
     if(e.target.id==='new-plaque-form'){
       e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target);

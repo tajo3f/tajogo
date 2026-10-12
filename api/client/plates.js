@@ -12,7 +12,7 @@ export default async function handler(req, res) {
     const ids = membershipClientIds(auth);
     if (!ids.length) return res.status(200).json({ ok: true, plates: [] });
     const filter = ids.join(',');
-    const rows = await supabaseRest(`plate_admin_view?client_id=in.(${filter})&select=*&order=created_at.desc`);
+    const rows = await supabaseRest(`tap_plate_admin_view?client_id=in.(${filter})&select=*&order=created_at.desc`);
     return res.status(200).json({ ok: true, plates: (rows || []).map(mapPlate) });
   } catch (error) {
     console.error('[client/plates]', { code: publicErrorCode(error), status: error?.status, detail: error?.detail });

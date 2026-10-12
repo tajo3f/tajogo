@@ -17,7 +17,7 @@ Sistema integrado para **QR Code dinâmico + NFC**, com painel administrativo, c
 - `go.tajodigital.com.br` → QR/NFC dinâmico
 - `tajodigital.com.br` → site institucional TAJO
 
-O mesmo projeto Vercel pode receber `painel.` e `go.`. As rotas `/q/`, `/n/` e `/t/` são resolvidas por Vercel Functions.
+A V3.3 usa um único projeto/domínio operacional: `go.tajodigital.com.br`. As rotas `/q/` e `/n/` resolvem QR/NFC e `/atv/TT-XXXXXX` abre a ativação única do cliente. `/t/` permanece apenas por compatibilidade.
 
 ## O que mudou em relação ao frontend antigo
 
@@ -27,7 +27,9 @@ Fluxo real:
 
 ```text
 painel → cria plaquinha → Supabase
-QR/NFC → go.tajodigital.com.br/t/TT-XXXXXX
+QR → go.tajodigital.com.br/q/TT-XXXXXX
+NFC → go.tajodigital.com.br/n/TT-XXXXXX
+Ativação → go.tajodigital.com.br/atv/TT-XXXXXX
        → Vercel Function
        → Supabase
        → destino atual
@@ -58,7 +60,10 @@ Crie `.env.local` a partir de `.env.example` somente no ambiente local. Nunca en
 
 - `GET /q/TT-XXXXXX` — acesso QR
 - `GET /n/TT-XXXXXX` — acesso NFC
-- `GET /t/TT-XXXXXX` — compatibilidade / link padrão
+- `GET /q/TT-XXXXXX` — QR físico
+- `GET /n/TT-XXXXXX` — NFC físico
+- `GET /atv/TT-XXXXXX` — ativação inicial única
+- `GET /t/TT-XXXXXX` — compatibilidade legada
 - `GET /api/health` — teste de backend
 - `GET /api/public/plate?code=TT-XXXXXX` — estado público mínimo da placa
 
@@ -90,9 +95,16 @@ Crie `.env.local` a partir de `.env.example` somente no ambiente local. Nunca en
 
 ## Observação sobre ativação do cliente
 
-Nesta versão, clientes podem alterar destinos quando possuem uma conta do Supabase vinculada ao estabelecimento em `client_members`. O vínculo pode ser criado com `supabase/LINK_CLIENT_USER.sql`. A geração automática de convites por e-mail pode ser adicionada depois sem alterar a arquitetura central.
+Nesta versão, clientes podem alterar destinos quando possuem uma conta do Supabase vinculada ao estabelecimento em `tap_client_members`. O vínculo pode ser criado com `supabase/LINK_CLIENT_USER.sql`. A geração automática de convites por e-mail pode ser adicionada depois sem alterar a arquitetura central.
 
 
-## V3.1 — compatibilidade com `public.profiles` existente
+## V3.3 — isolamento das tabelas TAJO TAP
 
-A migration principal agora usa `public.profiles.id` como referência ao `auth.users.id`, padrão compatível com projetos Supabase que já possuíam a tabela `profiles`. Ela também adiciona de forma não destrutiva os campos `full_name`, `phone`, `created_at` e `updated_at` quando ausentes. Isso corrige o erro `column user_id of relation profiles does not exist`.
+A migration principal agora usa `public.profiles.id` como referência ao `auth.users.id`, padrão compatível com projetos Supabase que já possuíam a tabela `tap_profiles`. Ela também adiciona de forma não destrutiva os campos `full_name`, `phone`, `created_at` e `updated_at` quando ausentes. Isso corrige o erro `column user_id of relation profiles does not exist`.
+
+
+## V3.3 — ativação única pelo cliente
+
+A V3.3 adiciona `supabase/migrations/002_plate_self_activation.sql`. O cliente recebe a plaquinha e o PIN, acessa automaticamente `/atv/TT-XXXXXX`, cria ou entra na conta, escolhe o destino e confirma. A ativação pública é então bloqueada no banco. Alterações futuras são feitas apenas pelo painel autenticado.
+
+**Ordem de publicação:** execute primeiro a migration `002`, depois publique o código V3.3 e faça o redeploy na Vercel.

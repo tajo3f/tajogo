@@ -532,3 +532,56 @@ tbody tr:hover { background:var(--surface-2); }
   body { background:#fff; }
   .card { box-shadow:none; }
 }
+
+/* TAJO TAP V3.3 — self-service activation */
+.activation-progress { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:22px 0 30px; }
+.activation-progress span { height:5px; border-radius:999px; background:#252b27; overflow:hidden; }
+.activation-progress span.active { background:var(--brand); box-shadow:0 0 0 1px rgba(84,217,13,.08); }
+.activation-topline { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+.activation-step-label { color:#8e9991; font-size:.78rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+.activation-hero { max-width:620px; }
+.activation-plate-mark, .activation-success-icon { width:68px; height:68px; border-radius:20px; display:grid; place-items:center; background:var(--brand); color:#0a0d0b; margin-bottom:20px; }
+.activation-plate-mark svg, .activation-success-icon svg { width:30px; height:30px; }
+.activation-feature-list { display:grid; gap:10px; margin:26px 0 6px; }
+.activation-feature-list > div { display:flex; gap:12px; align-items:flex-start; padding:14px 16px; border-radius:15px; border:1px solid #242b25; background:#0d110e; }
+.activation-feature-list svg { flex:0 0 auto; width:20px; color:var(--brand); margin-top:1px; }
+.activation-feature-list span { display:grid; gap:3px; }
+.activation-feature-list strong { color:#f2f6f3; font-size:.93rem; }
+.activation-feature-list small { color:#8e9991; line-height:1.45; }
+.activation-tabs { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:5px; background:#0b0e0c; border:1px solid #252b27; border-radius:14px; margin:22px 0; }
+.activation-tabs button { appearance:none; border:0; background:transparent; color:#8f9992; min-height:44px; border-radius:10px; font-weight:800; cursor:pointer; }
+.activation-tabs button.active { background:#1a211b; color:#fff; box-shadow:inset 0 0 0 1px #303a32; }
+.activation-account-ok { display:flex; align-items:center; gap:12px; padding:14px 16px; border:1px solid #2d4a2c; background:#111b11; border-radius:15px; margin:20px 0; }
+.activation-account-ok > svg { width:22px; color:var(--brand); }
+.activation-account-ok div { display:grid; gap:2px; }
+.activation-account-ok span { color:#8f9992; font-size:.84rem; }
+.activation-pin-field { max-width:320px; margin-top:22px; }
+.activation-pin-field .input { font-size:1.4rem; letter-spacing:.22em; font-weight:900; }
+.activation-choice-grid { margin-top:22px; }
+.activation-review { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:24px 0; }
+.activation-review > div { display:grid; gap:6px; padding:14px 16px; border-radius:14px; background:#0d110e; border:1px solid #242b25; min-width:0; }
+.activation-review span { color:#7f8982; font-size:.74rem; text-transform:uppercase; font-weight:800; letter-spacing:.07em; }
+.activation-review strong { color:#f1f5f2; overflow-wrap:anywhere; }
+.activation-review-url { grid-column:1/-1; }
+.activation-consent { display:flex; gap:12px; align-items:flex-start; padding:16px; border-radius:14px; border:1px solid #303832; background:#0b0e0c; color:#a7b0aa; line-height:1.5; cursor:pointer; }
+.activation-consent input { width:18px; height:18px; margin-top:2px; accent-color:#54d90d; }
+.activation-actions { gap:10px; margin-top:22px; }
+.activation-summary { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:24px; }
+.activation-summary > div { display:grid; gap:6px; padding:14px 16px; border-radius:14px; background:#0d110e; border:1px solid #242b25; }
+.activation-summary span { color:#7f8982; font-size:.74rem; text-transform:uppercase; font-weight:800; letter-spacing:.07em; }
+.activation-notice { padding:14px 16px; border-radius:14px; border:1px solid rgba(84,217,13,.28); background:rgba(84,217,13,.07); color:#aeb8b0; line-height:1.5; }
+.activation-loader { width:42px; height:42px; border:3px solid #283029; border-top-color:var(--brand); border-radius:50%; margin-top:28px; animation:tajo-spin .75s linear infinite; }
+.activation-pin-output { font-size:1.25rem; letter-spacing:.18em; font-weight:900; }
+@keyframes tajo-spin { to { transform:rotate(360deg); } }
+
+@media (max-width:640px) {
+  .activate-shell { padding:0; align-items:stretch; }
+  .activate-card { min-height:100dvh; border-radius:0; border-left:0; border-right:0; }
+  .activate-head { padding:18px 18px; }
+  .activate-body { padding:26px 18px 34px; }
+  .activation-review, .activation-summary { grid-template-columns:1fr; }
+  .activation-review-url { grid-column:auto; }
+  .activation-actions { flex-direction:column; }
+  .activation-actions .btn { width:100%; }
+  .activation-tabs { grid-template-columns:1fr; }
+}

@@ -95,3 +95,8 @@ export function publicErrorCode(error) {
   if (error.status >= 500) return 'SUPABASE_UNAVAILABLE';
   return 'BACKEND_ERROR';
 }
+
+// Server-only Supabase Auth Admin request. The secret key never reaches the browser.
+export async function supabaseAuthAdmin(path, options = {}) {
+  return request(`${baseUrl()}/auth/v1/admin/${path}`, options, secretKey());
+}

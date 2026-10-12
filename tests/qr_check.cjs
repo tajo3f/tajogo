@@ -6,7 +6,7 @@ vm.runInContext(fs.readFileSync(require('path').join(__dirname,'../assets/js/qr-
 const QR = context.window.TajoQRCodeCore;
 const levels = context.window.TajoQRErrorCorrectLevel;
 const qr = new QR(-1, levels.H);
-qr.addData('https://go.tajodigital.com.br/t/TT-7K2P9A');
+qr.addData('https://go.tajodigital.com.br/q/TT-7K2P9A');
 qr.make();
 if (qr.getModuleCount() < 21) throw new Error('QR matrix invalid');
 console.log('QR encoder check: OK — modules:', qr.getModuleCount());

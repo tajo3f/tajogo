@@ -17,7 +17,7 @@ async function createUniquePlate(payload, requestedCode = null) {
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const code = requestedCode || randomCode();
     try {
-      const rows = await supabaseRest('plates?select=id,code', {
+      const rows = await supabaseRest('tap_plates?select=id,code', {
         method: 'POST', headers: { Prefer: 'return=representation' },
         body: JSON.stringify({ ...payload, code })
       });
@@ -41,7 +41,7 @@ export default async function handler(req, res) {
     if (!auth) return;
 
     if (req.method === 'GET') {
-      const rows = await supabaseRest('plate_admin_view?select=*&order=created_at.desc');
+      const rows = await supabaseRest('tap_plate_admin_view?select=*&order=created_at.desc');
       return res.status(200).json({ ok: true, plates: (rows || []).map(mapPlate) });
     }
 
@@ -54,7 +54,7 @@ export default async function handler(req, res) {
     if (clientId && !isUuid(clientId)) return apiError(res, 400, 'CLIENT_INVALID', 'O cliente selecionado é inválido.');
 
     if (clientId) {
-      const clients = await supabaseRest(`clients?id=eq.${encodeURIComponent(clientId)}&select=id&limit=1`);
+      const clients = await supabaseRest(`tap_clients?id=eq.${encodeURIComponent(clientId)}&select=id&limit=1`);
       if (!clients?.[0]) return apiError(res, 404, 'CLIENT_NOT_FOUND', 'O cliente selecionado não foi encontrado.');
     }
 
@@ -67,21 +67,21 @@ export default async function handler(req, res) {
 
     const pin = activationPin();
     try {
-      await supabaseRest('plate_activation_codes', {
+      await supabaseRest('tap_plate_activation_codes', {
         method: 'POST', headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ plate_id: created.id, code_hash: hashPin(pin), created_by: auth.user.id })
       });
     } catch (error) {
-      await supabaseRest(`plates?id=eq.${encodeURIComponent(created.id)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }).catch(() => null);
+      await supabaseRest(`tap_plates?id=eq.${encodeURIComponent(created.id)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }).catch(() => null);
       throw error;
     }
 
-    await supabaseRest('audit_logs', {
+    await supabaseRest('tap_audit_logs', {
       method: 'POST', headers: { Prefer: 'return=minimal' },
       body: JSON.stringify({ actor_user_id: auth.user.id, action: 'plate.create', entity_type: 'plate', entity_id: created.id, metadata: { code: created.code, name } })
     }).catch(() => null);
 
-    const rows = await supabaseRest(`plate_admin_view?id=eq.${encodeURIComponent(created.id)}&select=*&limit=1`);
+    const rows = await supabaseRest(`tap_plate_admin_view?id=eq.${encodeURIComponent(created.id)}&select=*&limit=1`);
     return res.status(201).json({ ok: true, plate: mapPlate(rows?.[0] || created), activationCode: pin });
   } catch (error) {
     console.error('[admin/plates]', { code: publicErrorCode(error), status: error?.status, detail: error?.detail });

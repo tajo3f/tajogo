@@ -6,8 +6,8 @@
 - sessão do navegador usa cookies `HttpOnly`;
 - chave `sb_secret_...` existe somente na Vercel;
 - frontend chama somente APIs do próprio domínio;
-- APIs administrativas validam `platform_admins`;
-- APIs de cliente validam `client_members`;
+- APIs administrativas validam `tap_platform_admins`;
+- APIs de cliente validam `tap_client_members`;
 - tabelas possuem RLS para proteção adicional;
 - alteração de destino é executada por RPC transacional;
 - redirects aceitam somente URLs HTTPS;

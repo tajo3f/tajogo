@@ -1,6 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
+    { "source": "/atv/:code", "destination": "/index.html" },
+    { "source": "/atv/:code", "destination": "/index.html" },
     { "source": "/q/:code", "destination": "/api/resolve?code=:code&source=qr" },
     { "source": "/n/:code", "destination": "/api/resolve?code=:code&source=nfc" },
     { "source": "/t/:code", "destination": "/api/resolve?code=:code&source=qr" }
