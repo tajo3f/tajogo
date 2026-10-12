@@ -17,6 +17,7 @@
     { "source": "/api/seller/hub", "destination": "/api/index?route=seller/hub" },
     { "source": "/api/seller/chat", "destination": "/api/index?route=seller/chat" },
     { "source": "/api/admin/sellers", "destination": "/api/index?route=admin/sellers" },
+    { "source": "/api/admin/batches", "destination": "/api/index?route=admin/batches" },
     { "source": "/api/resolve", "destination": "/api/index?route=resolve" },
     { "source": "/atv/:code", "destination": "/index.html" },
     { "source": "/q/:code", "destination": "/api/index?route=resolve&code=:code&source=qr" },

@@ -15,6 +15,7 @@ import health from '../server/health.js';
 import sellerHub from '../server/seller/hub.js';
 import sellerChat from '../server/seller/chat.js';
 import adminSellers from '../server/admin/sellers.js';
+import adminBatches from '../server/admin/batches.js';
 
 const ROUTES = new Map([
   ['auth/login', authLogin],
@@ -33,7 +34,8 @@ const ROUTES = new Map([
   ['health', health],
   ['seller/hub', sellerHub],
   ['seller/chat', sellerChat],
-  ['admin/sellers', adminSellers]
+  ['admin/sellers', adminSellers],
+  ['admin/batches', adminBatches]
 ]);
 
 function routeName(value) {

@@ -1,6 +1,6 @@
 import { allowMethods, apiError, readJson, safePlateCode, setNoStore, text } from '../_http.js';
 import { currentUser, setSessionCookies } from '../_auth.js';
-import { publicErrorCode, supabaseAuth, supabaseRest, supabaseRpc } from '../_supabase.js';
+import { publicErrorCode, supabaseAuth, supabaseAuthAdmin, supabaseRest, supabaseRpc } from '../_supabase.js';
 
 const TYPES = new Set(['google', 'whatsapp', 'instagram', 'smart', 'map', 'custom']);
 const LABELS = {
@@ -31,7 +31,7 @@ function activationError(res, code, retryAfter = null) {
     PIN_USED: [409, 'O código de ativação desta plaquinha já foi utilizado.'],
     PIN_EXPIRED: [409, 'O código de ativação expirou. Solicite um novo código à TAJO.'],
     PIN_INVALID: [400, 'Código de ativação incorreto. Confira os seis números e tente novamente.'],
-    PIN_LOCKED: [429, 'Muitas tentativas incorretas. A ativação foi bloqueada temporariamente.'],
+    PIN_LOCKED: [429, retryAfter ? `Muitas tentativas incorretas. Tente novamente após ${new Date(retryAfter).toLocaleString('pt-BR')}.` : 'Muitas tentativas incorretas. A ativação foi bloqueada temporariamente.'],
     USER_NOT_FOUND: [401, 'Não foi possível validar a conta responsável.'],
     COMPANY_REQUIRED: [400, 'Informe o nome do estabelecimento.'],
     TYPE_INVALID: [400, 'Selecione um tipo de destino válido.'],
@@ -44,9 +44,13 @@ function activationError(res, code, retryAfter = null) {
 
 async function getPlate(code) {
   const rows = await supabaseRest(
-    `tap_plates?code=eq.${encodeURIComponent(code)}&select=code,name,status,client_id,setup_status,configuration_locked,configured_at&limit=1`
+    `tap_plates?code=eq.${encodeURIComponent(code)}&select=code,name,status,client_id,owner_user_id,current_destination_id,setup_status,configuration_locked,configured_at&limit=1`
   );
   return rows?.[0] || null;
+}
+
+function activationReference() {
+  return `ATV-${Date.now().toString(36).slice(-6).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 }
 
 export default async function handler(req, res) {
@@ -54,8 +58,13 @@ export default async function handler(req, res) {
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   if (!allowMethods(req, res, ['GET', 'POST'])) return;
 
+  let stage = 'start';
+  let createdUserId = null;
+  let createdNewUser = false;
+
   try {
     if (req.method === 'GET') {
+      stage = 'plate_lookup';
       const code = safePlateCode(req.query?.code);
       if (!code) return apiError(res, 400, 'CODE_INVALID', 'Código de plaquinha inválido.');
       const plate = await getPlate(code);
@@ -78,6 +87,7 @@ export default async function handler(req, res) {
       });
     }
 
+    stage = 'input_validation';
     const body = readJson(req);
     const code = safePlateCode(body?.code);
     const pin = String(body?.pin || '').replace(/\D/g, '').slice(0, 6);
@@ -96,8 +106,9 @@ export default async function handler(req, res) {
     if (!url) return apiError(res, 400, 'URL_INVALID', 'Informe um link HTTPS válido.');
     if (companyName.length < 2) return apiError(res, 400, 'COMPANY_REQUIRED', 'Informe o nome do estabelecimento.');
 
-    // Verify PIN before account creation. This also applies temporary lockout after repeated failures.
-    const pinRows = await supabaseRpc('tap_check_activation_pin', {
+    // V4.1 usa RPC com nome novo para evitar colisão de retorno com versões antigas.
+    stage = 'pin_validation_v4';
+    const pinRows = await supabaseRpc('tap_validate_activation_pin_v4', {
       p_plate_code: code,
       p_pin: pin
     });
@@ -109,6 +120,7 @@ export default async function handler(req, res) {
     let user = null;
     let sessionReady = false;
 
+    stage = 'account';
     if (mode === 'existing') {
       user = await currentUser(req, res);
       if (!user?.id) {
@@ -141,6 +153,8 @@ export default async function handler(req, res) {
       }
 
       user = signup.user;
+      createdUserId = user.id;
+      createdNewUser = true;
       const signupSession = signup.session || signup;
       if (signupSession?.access_token && signupSession?.refresh_token) {
         setSessionCookies(res, signupSession);
@@ -148,9 +162,10 @@ export default async function handler(req, res) {
       }
     }
 
+    stage = 'activate_v4';
     const accountEmail = user.email || email;
     const accountName = fullName || user.user_metadata?.full_name || accountEmail?.split('@')[0] || 'Cliente';
-    const claimRows = await supabaseRpc('tap_claim_plate_once', {
+    const claimRows = await supabaseRpc('tap_activate_plate_v4', {
       p_plate_code: code,
       p_pin: pin,
       p_user: user.id,
@@ -165,11 +180,16 @@ export default async function handler(req, res) {
 
     const claim = claimRows?.[0] || {};
     if (claim.result_code !== 'OK') {
+      // Não mantém conta recém-criada sem plaquinha quando a ativação não conclui.
+      if (createdNewUser && createdUserId) {
+        await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
+      }
       return activationError(res, claim.result_code || 'ACTIVATION_FAILED');
     }
 
     if (mode === 'existing') sessionReady = true;
 
+    stage = 'done';
     return res.status(200).json({
       ok: true,
       activated: true,
@@ -181,11 +201,34 @@ export default async function handler(req, res) {
       configuredAt: claim.configured_at || null
     });
   } catch (error) {
+    const code = publicErrorCode(error);
+    const reference = activationReference();
     console.error('[public/activate]', {
-      code: publicErrorCode(error),
+      reference,
+      stage,
+      code,
       status: error?.status,
       detail: error?.detail
     });
-    return apiError(res, 503, publicErrorCode(error), 'Não foi possível concluir a ativação agora. Tente novamente em instantes.');
+
+    if (createdNewUser && createdUserId && stage === 'activate_v4') {
+      await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
+    }
+
+    if (['SUPABASE_BAD_REQUEST', 'SUPABASE_RESOURCE'].includes(code) && ['pin_validation_v4', 'activate_v4'].includes(stage)) {
+      return res.status(503).json({
+        ok: false,
+        error: 'ACTIVATION_DB_UPDATE_REQUIRED',
+        message: 'O módulo de ativação precisa da atualização V4.1 no Supabase. Execute a migration 004_activation_v4_and_batches.sql.',
+        reference
+      });
+    }
+
+    return res.status(503).json({
+      ok: false,
+      error: code,
+      message: 'Não foi possível concluir a ativação. A tentativa não foi confirmada. Tente novamente; se persistir, informe a referência ao suporte TAJO.',
+      reference
+    });
   }
 }

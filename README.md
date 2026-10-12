@@ -1,146 +1,97 @@
-# TAJO TAP V4
+# TAJO TAP Full Stack V4.1
 
-Sistema QR/NFC dinâmico com administração, clientes, ativação única, módulo comercial de vendedores e chat interno persistente.
+Sistema QR/NFC dinâmico com administração, clientes, ativação única, módulo de vendedores, chat interno, analytics e produção de plaquinhas em lote.
 
 **Sistema desenvolvido por João Paulo Brandão.**
 
-Veja `V4-INSTALACAO.md` e `CHANGELOG-V4.md`.
+## O que esta versão resolve
 
-# TAJO TAP Full Stack V4
+A V4.1 corrige o fluxo de ativação que podia terminar em uma mensagem genérica de falha mesmo quando a estrutura do banco estava em versões diferentes. Para eliminar colisões históricas, a ativação passa a usar RPCs novas e exclusivas da V4.1:
 
-Esta versão evolui a V3.3.1 sem exigir nova migration no banco para os recursos de interface. Mantém o fluxo `/atv/TT-XXXXXX` e adiciona recursos operacionais solicitados para uso real do painel.
+- `tap_validate_activation_pin_v4(text,text)`
+- `tap_activate_plate_v4(text,text,uuid,text,text,text,text,text,text,text)`
 
-## Novidades V4
+Também separa corretamente o sucesso da ativação do refresh posterior do painel. Se a plaquinha for ativada e o painel falhar ao atualizar, o usuário continua vendo a confirmação de ativação em vez de um falso erro.
 
-- botão **Sair da conta** visível no menu lateral e em Configurações;
-- exclusão administrativa de plaquinhas com confirmação digitando o código;
-- exclusão em cascata dos dados vinculados já previstos pelas FKs do backend;
-- registro de auditoria `plate.delete` antes da remoção;
-- nova área **Vendas TAJO TAP**;
-- playbook com prospecção, lead ideal, auditoria rápida, abordagens, demonstração, fechamento e follow-up;
-- biblioteca de objeções com respostas prontas para copiar;
-- princípios de neuromarketing ético aplicados ao produto;
-- busca interna nos scripts e objeções;
-- refinamentos de responsividade para celular, tablet e desktop.
+## Produção em lote
 
-## Atualização
+O Super Admin ganhou a área **Produção**:
 
-Se a V3.3.1 já está publicada e a migration `002_plate_activation_flow.sql` já foi aplicada, **não é necessário executar uma nova migration para estes recursos**. Publique os arquivos da V4 no mesmo projeto Vercel e faça um novo deploy.
-
----
-
-Sistema integrado para **QR Code dinâmico + NFC**, com painel administrativo, clientes, portal de cliente, scanner, analytics e motor de redirecionamento.
+- gera de 1 a 100 plaquinhas por lote;
+- cria códigos exclusivos `TT-XXXXXX`;
+- cria PINs exclusivos de 6 dígitos;
+- grava somente o hash do PIN no banco;
+- QR permanente: `https://go.tajodigital.com.br/q/TT-XXXXXX`;
+- NFC permanente: `https://go.tajodigital.com.br/n/TT-XXXXXX`;
+- ativação: `https://go.tajodigital.com.br/atv/TT-XXXXXX`;
+- histórico de lotes;
+- impressão/Salvar PDF;
+- arquivo HTML vetorial com QRs de alto contraste e margem de segurança;
+- mapa interno CSV de PINs disponível apenas na criação do lote.
 
 ## Stack
 
-- Frontend: HTML + CSS + JavaScript Vanilla
-- Backend: Vercel Functions (Node.js 24)
-- Banco: Supabase PostgreSQL
-- Auth: Supabase Auth
-- Segurança: cookies HttpOnly + autorização no backend + RLS no banco
+- Frontend: HTML5 + CSS + JavaScript Vanilla
+- Backend: Node.js em Vercel Functions
+- Banco/Auth: Supabase
 - Deploy: GitHub + Vercel
+- API consolidada em **1 Serverless Function** (`api/index.js`)
 
-## Domínios planejados
+## Atualização a partir da V4
 
-- `painel.tajodigital.com.br` → painel TAJO TAP
-- `go.tajodigital.com.br` → QR/NFC dinâmico
-- `tajodigital.com.br` → site institucional TAJO
+Execute primeiro no Supabase:
 
-A V3.3 usa um único projeto/domínio operacional: `go.tajodigital.com.br`. As rotas `/q/` e `/n/` resolvem QR/NFC e `/atv/TT-XXXXXX` abre a ativação única do cliente. `/t/` permanece apenas por compatibilidade.
+`supabase/migrations/004_activation_v4_and_batches.sql`
 
-## O que mudou em relação ao frontend antigo
+Não execute novamente as migrations 001, 002 e 003 se elas já estiverem aplicadas.
 
-O protótipo antigo guardava plaquinhas no `localStorage`, portanto uma placa criada no computador não existia no celular. Esta versão salva os dados no Supabase e o redirect consulta o banco em cada acesso.
+Depois publique os arquivos da V4.1 no mesmo repositório GitHub ligado ao mesmo projeto Vercel.
 
-Fluxo real:
-
-```text
-painel → cria plaquinha → Supabase
-QR → go.tajodigital.com.br/q/TT-XXXXXX
-NFC → go.tajodigital.com.br/n/TT-XXXXXX
-Ativação → go.tajodigital.com.br/atv/TT-XXXXXX
-       → Vercel Function
-       → Supabase
-       → destino atual
-       → redirect
-```
-
-## Instalação
-
-Leia **BACKEND-SETUP.md** e siga exatamente a ordem.
-
-## Testes locais de código
-
-```bash
-npm test
-```
-
-O projeto não possui dependências npm de runtime. Para simular as Functions localmente use Vercel CLI:
-
-```bash
-npx vercel dev
-```
-
-Crie `.env.local` a partir de `.env.example` somente no ambiente local. Nunca envie segredos ao GitHub.
+Leia `V4.1-INSTALACAO.md` antes do deploy.
 
 ## Rotas principais
 
 ### Públicas
 
-- `GET /q/TT-XXXXXX` — acesso QR
-- `GET /n/TT-XXXXXX` — acesso NFC
-- `GET /q/TT-XXXXXX` — QR físico
-- `GET /n/TT-XXXXXX` — NFC físico
-- `GET /atv/TT-XXXXXX` — ativação inicial única
-- `GET /t/TT-XXXXXX` — compatibilidade legada
-- `GET /api/health` — teste de backend
-- `GET /api/public/plate?code=TT-XXXXXX` — estado público mínimo da placa
-
-### Auth
-
-- `POST /api/auth/login`
-- `POST /api/auth/logout`
-- `GET /api/auth/me`
+- `/q/TT-XXXXXX` — QR físico
+- `/n/TT-XXXXXX` — NFC físico
+- `/atv/TT-XXXXXX` — ativação inicial única
+- `/t/TT-XXXXXX` — compatibilidade
+- `/api/health` — saúde do backend
 
 ### Admin
 
-- `GET/POST /api/admin/clients`
-- `GET/POST /api/admin/plates`
-- `GET/PATCH /api/admin/plate?code=...`
-- `POST /api/admin/destination`
+- `/api/admin/plates`
+- `/api/admin/plate`
+- `/api/admin/clients`
+- `/api/admin/sellers`
+- `/api/admin/batches`
+
+### Vendedores
+
+- `/api/seller/hub`
+- `/api/seller/chat`
 
 ### Cliente
 
-- `GET /api/client/plates`
-- `POST /api/client/destination`
+- `/api/client/plates`
+- `/api/client/destination`
 
-## Status da plaquinha
+## Segurança
 
-- `inventory` — estoque
-- `unconfigured` — criada, aguardando destino
-- `active` — redirecionando normalmente
-- `paused` — temporariamente pausada
-- `archived` — retirada de operação
+- chaves privilegiadas permanecem apenas na Vercel;
+- cookies de sessão HttpOnly;
+- autorização server-side por perfil;
+- validação de URLs HTTPS;
+- PIN protegido por SHA-256 e limite de tentativas;
+- ativação pública bloqueada depois da primeira configuração;
+- vendedor vê somente sua própria carteira e seus próprios resultados;
+- PINs em texto puro de lotes não são armazenados para recuperação posterior.
 
-## Observação sobre ativação do cliente
+## Testes locais
 
-Nesta versão, clientes podem alterar destinos quando possuem uma conta do Supabase vinculada ao estabelecimento em `tap_client_members`. O vínculo pode ser criado com `supabase/LINK_CLIENT_USER.sql`. A geração automática de convites por e-mail pode ser adicionada depois sem alterar a arquitetura central.
+```bash
+npm test
+```
 
-
-## V3.3 — isolamento das tabelas TAJO TAP
-
-A migration principal agora usa `public.profiles.id` como referência ao `auth.users.id`, padrão compatível com projetos Supabase que já possuíam a tabela `tap_profiles`. Ela também adiciona de forma não destrutiva os campos `full_name`, `phone`, `created_at` e `updated_at` quando ausentes. Isso corrige o erro `column user_id of relation profiles does not exist`.
-
-
-## V3.3 — ativação única pelo cliente
-
-A V3.3.1 usa uma única migration incremental: `supabase/migrations/002_plate_activation_flow.sql`. O cliente recebe a plaquinha e o PIN, acessa automaticamente `/atv/TT-XXXXXX`, cria ou entra na conta, escolhe o destino e confirma. A ativação pública é então bloqueada no banco. Alterações futuras são feitas apenas pelo painel autenticado.
-
-**Ordem de publicação:** execute primeiro a migration `002`, depois publique o código V3.3.1 e faça o redeploy na Vercel.
-
-
-## V3.3.1 — correção migration 42P13
-
-A migration 002 agora remove e recria explicitamente as RPCs de ativação antes de defini-las. Isso corrige o erro PostgreSQL `42P13: cannot change return type of existing function` em bancos onde uma versão anterior da função já existia. A view administrativa também preserva as colunas antigas na mesma ordem e adiciona os novos campos somente no final.
-## V4 — Vercel Hobby
-Esta versão consolida a API em uma única Vercel Function (`api/index.js`). Os módulos em `server/` são código interno importado pela função e não criam funções serverless separadas. As rotas públicas existentes continuam iguais por meio de `vercel.json`. Não há nova migration de banco para esta correção.
+A suíte verifica sintaxe JavaScript, assets, encoder QR, exposição de segredos e quantidade de Vercel Functions.

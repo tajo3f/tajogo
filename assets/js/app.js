@@ -44,7 +44,8 @@
     lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
     sales: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/><path d="m4 8 5-3 5 6 5-8"/></svg>',
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v5M14 11v5"/></svg>',
-    target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M20 4 14 10"/></svg>'
+    target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M20 4 14 10"/></svg>',
+    printer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M6 9V3h12v6"/><rect x="6" y="14" width="12" height="7" rx="1"/><path d="M6 17H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"/><path d="M18 12h.01"/></svg>'
   };
 
   const PLAYBOOK = window.TAJO_TAP_SALES_PLAYBOOK || { prospecting: [], principles: [], scripts: [], objections: [], routine: [], guardrails: [] };
@@ -61,6 +62,9 @@
     clients: [],
     sellers: [],
     adminSales: [],
+    batches: [],
+    productionError: '',
+    lastBatch: null,
     sellerData: { seller:null, metrics:{}, leads:[], sales:[], messages:[] },
     chatTimer: null,
     sidebarOpen: false,
@@ -93,6 +97,7 @@
       const error = new Error(payload?.message || 'Não foi possível concluir a operação.');
       error.status = response.status;
       error.code = payload?.error || 'REQUEST_FAILED';
+      error.reference = payload?.reference || null;
       throw error;
     }
     return payload || { ok: true };
@@ -123,8 +128,18 @@
     state.sellers = Array.isArray(result.sellers) ? result.sellers : [];
     state.adminSales = Array.isArray(result.sales) ? result.sales : [];
   }
+  async function loadProductionData() {
+    try {
+      const result = await apiFetch('/api/admin/batches');
+      state.batches = Array.isArray(result.batches) ? result.batches : [];
+      state.productionError = '';
+    } catch (error) {
+      state.batches = [];
+      state.productionError = error.message || 'Não foi possível carregar os lotes.';
+    }
+  }
   async function refreshRoleData() {
-    if (state.role === 'admin') return Promise.all([loadAdminData(), loadSellersAdmin()]);
+    if (state.role === 'admin') return Promise.all([loadAdminData(), loadSellersAdmin(), loadProductionData()]);
     if (state.role === 'client') return loadClientData();
     if (state.role === 'seller') return loadSellerData();
   }
@@ -250,6 +265,7 @@
     const nav = [
       ['dashboard','dashboard','Visão geral'],
       ['plaques','plate','Plaquinhas'],
+      ['production','printer','Produção'],
       ['scanner','scan','Escanear'],
       ['clients','clients','Clientes'],
       ['analytics','analytics','Analytics'],
@@ -322,6 +338,7 @@
   function renderPage(r) {
     if (r.name === 'dashboard') return dashboardPage();
     if (r.name === 'plaques') return plaquesPage();
+    if (r.name === 'production') return productionPage();
     if (r.name === 'plaque') return plaqueDetail(r.param);
     if (r.name === 'scanner') return scannerPage();
     if (r.name === 'clients') return clientsPage();
@@ -379,7 +396,7 @@
     const rows = state.plaques.map(p => `<tr data-route="plaque/${esc(p.code)}"><td><div class="entity"><div class="entity-icon">${ICONS.plate}</div><div class="entity-copy"><strong>${esc(p.name)}</strong><span class="mono">${esc(p.code)}</span></div></div></td><td>${esc(p.client)}</td><td>${esc(p.destinationLabel)}</td><td>${formatNumber(p.scansMonth)}</td><td>${statusBadge(p.status)}</td><td><button class="btn btn-sm btn-ghost" data-route="plaque/${esc(p.code)}">Gerenciar ${ICONS.chevron}</button></td></tr>`).join('');
     const cards = state.plaques.map(p => `<article class="card mobile-card"><div class="mobile-card-head"><div class="entity"><div class="entity-icon">${ICONS.plate}</div><div class="entity-copy"><strong>${esc(p.name)}</strong><span class="mono">${esc(p.code)}</span></div></div>${statusBadge(p.status)}</div><div class="mobile-card-meta"><div><span>Cliente</span><strong>${esc(p.client)}</strong></div><div><span>Acessos / mês</span><strong>${formatNumber(p.scansMonth)}</strong></div><div><span>Destino</span><strong>${esc(p.destinationLabel)}</strong></div><div><span>Total</span><strong>${formatNumber(p.scansTotal)}</strong></div></div><button class="btn btn-ghost" style="width:100%" data-route="plaque/${esc(p.code)}">Gerenciar plaquinha ${ICONS.arrow}</button></article>`).join('');
     return `
-      ${pageHead('Operação','Plaquinhas','Crie, filtre e gerencie todos os pontos QR/NFC da TAJO TAP.', `<button class="btn btn-ghost" data-action="open-scanner">${ICONS.scan} Escanear</button><button class="btn btn-primary" data-action="new-plaque">${ICONS.plus} Nova plaquinha</button>`)}
+      ${pageHead('Operação','Plaquinhas','Crie, filtre e gerencie todos os pontos QR/NFC da TAJO TAP.', `<button class="btn btn-ghost" data-action="new-batch">${ICONS.printer} Criar lote</button><button class="btn btn-ghost" data-action="open-scanner">${ICONS.scan} Escanear</button><button class="btn btn-primary" data-action="new-plaque">${ICONS.plus} Nova plaquinha</button>`)}
       <div class="toolbar"><div class="grow input-with-icon">${ICONS.search}<input id="plaque-search" class="input" placeholder="Buscar por nome, cliente ou código"></div><select id="plaque-filter" class="select" style="width:auto"><option value="all">Todos os status</option><option value="active">Ativas</option><option value="unconfigured">Não configuradas</option><option value="paused">Pausadas</option></select></div>
       <div class="table-wrap"><table><thead><tr><th>Plaquinha</th><th>Cliente</th><th>Destino</th><th>Acessos mês</th><th>Status</th><th></th></tr></thead><tbody id="plaque-tbody">${rows}</tbody></table></div>
       <div class="mobile-list" id="plaque-mobile-list">${cards}</div>`;
@@ -425,6 +442,103 @@
     const rows = state.clients.map(c=>`<tr><td><div class="entity"><div class="entity-icon">${esc(c.name[0])}</div><div class="entity-copy"><strong>${esc(c.name)}</strong><span>${esc(c.city)}</span></div></div></td><td>${esc(c.contact)}</td><td>${esc(c.phone)}</td><td>${c.plates}</td><td>${formatNumber(c.scans)}</td><td>${c.status==='active'?'<span class="badge badge-success">Ativo</span>':'<span class="badge badge-muted">Inativo</span>'}</td></tr>`).join('');
     const cards = state.clients.map(c=>`<article class="card mobile-card"><div class="mobile-card-head"><div class="entity"><div class="entity-icon">${esc(c.name[0])}</div><div class="entity-copy"><strong>${esc(c.name)}</strong><span>${esc(c.city)}</span></div></div>${c.status==='active'?'<span class="badge badge-success">Ativo</span>':'<span class="badge badge-muted">Inativo</span>'}</div><div class="mobile-card-meta"><div><span>Plaquinhas</span><strong>${c.plates}</strong></div><div><span>Acessos</span><strong>${formatNumber(c.scans)}</strong></div></div><button class="btn btn-ghost" style="width:100%">Ver cliente ${ICONS.arrow}</button></article>`).join('');
     return `${pageHead('Relacionamento','Clientes','Centralize quem possui plaquinhas e acompanhe o uso por estabelecimento.', `<button class="btn btn-primary" data-action="new-client">${ICONS.plus} Novo cliente</button>`)}<div class="toolbar"><div class="grow input-with-icon">${ICONS.search}<input class="input" placeholder="Buscar cliente"></div></div><div class="table-wrap"><table><thead><tr><th>Cliente</th><th>Contato</th><th>Telefone</th><th>Placas</th><th>Acessos</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div><div class="mobile-list">${cards}</div>`;
+  }
+
+  function productionPage() {
+    const batches = state.batches || [];
+    const recent = state.lastBatch;
+    const recentBlock = recent ? `<section class="card card-pad production-current"><div class="card-title"><div><div class="eyebrow">Lote recém-criado</div><h2>${esc(recent.code)}</h2><p>${esc(recent.label)} · ${recent.quantity} unidades</p></div><span class="badge badge-success">PRONTO</span></div><div class="activation-notice"><strong>Salve o mapa interno agora.</strong> Os PINs aparecem apenas nesta criação. O arquivo para a gráfica contém somente QR permanente e código da unidade.</div><div class="row wrap" style="margin-top:16px"><button class="btn btn-primary" data-action="print-batch" data-id="${esc(recent.id)}">${ICONS.printer} Imprimir / Salvar PDF</button><button class="btn btn-ghost" data-action="download-batch-print" data-id="${esc(recent.id)}">${ICONS.download} Arquivo vetorial HTML</button><button class="btn btn-ghost" data-action="download-batch-map" data-id="${esc(recent.id)}">${ICONS.download} Mapa interno CSV</button></div></section>` : '';
+    const rows = batches.map(batch => `<tr><td><strong>${esc(batch.code)}</strong><small>${esc(batch.label)}</small></td><td>${batch.quantity}</td><td><span class="badge">${esc(batch.status || 'ready')}</span></td><td>${batch.createdAt ? new Date(batch.createdAt).toLocaleString('pt-BR') : '—'}</td><td><div class="row wrap"><button class="btn btn-sm btn-ghost" data-action="print-batch" data-id="${esc(batch.id)}">${ICONS.printer} Imprimir</button><button class="btn btn-sm btn-ghost" data-action="download-batch-print" data-id="${esc(batch.id)}">${ICONS.download} HTML</button></div></td></tr>`).join('');
+    return `${pageHead('Produção','Lotes de plaquinhas','Gere várias unidades de uma vez. Cada peça recebe QR permanente exclusivo no padrão /q/TT-XXXXXX, NFC /n/TT-XXXXXX e ativação /atv/TT-XXXXXX.', `<button class="btn btn-primary" data-action="new-batch">${ICONS.plus} Novo lote</button>`)}
+      ${state.productionError ? `<div class="activation-notice" style="margin-bottom:18px"><strong>Atualização necessária:</strong> ${esc(state.productionError)}</div>` : ''}
+      ${recentBlock}
+      <section class="production-guide">
+        <article class="card card-pad"><div class="eyebrow">1 · GERAR</div><h3>Escolha a quantidade</h3><p>Crie de 1 a 100 unidades por lote. Os códigos e PINs são gerados pelo backend.</p></article>
+        <article class="card card-pad"><div class="eyebrow">2 · IMPRIMIR</div><h3>QR no padrão oficial</h3><p><span class="mono">go.tajodigital.com.br/q/TT-XXXXXX</span>. QR preto, fundo branco e margem de segurança.</p></article>
+        <article class="card card-pad"><div class="eyebrow">3 · ATIVAR</div><h3>Cliente configura uma vez</h3><p>Enquanto pendente, o QR conduz à ativação. Depois, passa a abrir o destino definido pelo cliente.</p></article>
+      </section>
+      <section class="card table-card" style="margin-top:18px"><div class="card-title card-pad"><div><h2>Histórico de lotes</h2><p>Reimprima QRs sem alterar os códigos físicos existentes.</p></div></div><div class="responsive-table"><table><thead><tr><th>Lote</th><th>Qtd.</th><th>Status</th><th>Criado</th><th>Arquivos</th></tr></thead><tbody>${rows || '<tr><td colspan="5">Nenhum lote criado ainda.</td></tr>'}</tbody></table></div></section>`;
+  }
+
+  function batchById(id) {
+    if (state.lastBatch?.id === id) return state.lastBatch;
+    return (state.batches || []).find(batch => batch.id === id) || null;
+  }
+
+  function qrSvgMarkup(text) {
+    if (!window.TajoQRCodeCore || !text) return '';
+    const QR = window.TajoQRCodeCore, levels = window.TajoQRErrorCorrectLevel;
+    const qr = new QR(-1, levels.H); qr.addData(text); qr.make();
+    const count = qr.getModuleCount();
+    const quiet = 4, size = count + quiet * 2;
+    let path = '';
+    for (let row = 0; row < count; row += 1) {
+      for (let col = 0; col < count; col += 1) {
+        if (qr.isDark(row, col)) path += `M${col+quiet} ${row+quiet}h1v1h-1z`;
+      }
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges" aria-label="QR Code"><rect width="100%" height="100%" fill="#fff"/><path d="${path}" fill="#000"/></svg>`;
+  }
+
+  function batchItems(batch) {
+    if (!batch) return [];
+    if (Array.isArray(batch.items)) return batch.items;
+    return (batch.plates || []).map(p => ({ ...p, position: p.position || p.batch_position }));
+  }
+
+  function buildBatchPrintHtml(batch) {
+    const items = batchItems(batch);
+    const cards = items.map(item => {
+      const qrUrl = `https://${CONFIG.goDomain}${CONFIG.platePath}${item.code}`;
+      return `<article class="qr-card"><div class="brand">TAJO <b>TAP</b></div><div class="label">QR PERMANENTE</div><div class="qr">${qrSvgMarkup(qrUrl)}</div><strong>${esc(item.code)}</strong><small>${esc(qrUrl)}</small></article>`;
+    }).join('');
+    return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(batch.code)} · TAJO TAP</title><style>@page{size:A4;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0}.head{margin-bottom:8mm}.head h1{margin:0 0 2mm;font-size:18pt}.head p{margin:0;color:#555}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7mm}.qr-card{break-inside:avoid;border:1px solid #ddd;border-radius:4mm;padding:5mm;text-align:center;min-height:82mm;display:flex;flex-direction:column;align-items:center;justify-content:flex-start}.brand{font-weight:800;font-size:14pt;margin-bottom:3mm}.brand b{color:#49df00}.label{font-size:7pt;letter-spacing:.12em;color:#666;margin-bottom:2mm}.qr{width:50mm;height:50mm}.qr svg{width:100%;height:100%;display:block}.qr-card strong{font-family:monospace;font-size:12pt;margin-top:2mm}.qr-card small{font-size:6.5pt;color:#666;word-break:break-all;margin-top:1mm}@media print{.no-print{display:none}}</style></head><body><header class="head"><h1>TAJO TAP · ${esc(batch.code)}</h1><p>${esc(batch.label)} · ${items.length} QR Codes · padrão permanente /q/TT-XXXXXX</p></header><main class="grid">${cards}</main></body></html>`;
+  }
+
+  function printBatch(batch) {
+    if (!batch) return toast('Lote não encontrado','Atualize a página e tente novamente.');
+    const win = window.open('', '_blank');
+    if (!win) return toast('Pop-up bloqueado','Permita pop-ups para gerar a folha de impressão.');
+    win.document.open(); win.document.write(buildBatchPrintHtml(batch)); win.document.close();
+    setTimeout(() => { try { win.focus(); win.print(); } catch {} }, 400);
+  }
+
+  function downloadTextFile(filename, content, type='text/plain;charset=utf-8') {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function downloadBatchPrint(batch) {
+    if (!batch) return toast('Lote não encontrado','Atualize a página e tente novamente.');
+    downloadTextFile(`${batch.code}-QR-IMPRESSAO.html`, buildBatchPrintHtml(batch), 'text/html;charset=utf-8');
+  }
+
+  function downloadBatchMap(batch) {
+    if (!batch || !Array.isArray(batch.items) || !batch.items.some(i => i.activationCode)) {
+      return toast('PINs indisponíveis','Por segurança, os PINs só podem ser exportados na sessão em que o lote foi criado.');
+    }
+    const header = ['posicao','codigo','pin_ativacao','qr_url','nfc_url','url_ativacao'];
+    const lines = batch.items.map(item => [
+      item.position,
+      item.code,
+      item.activationCode,
+      `https://${CONFIG.goDomain}${CONFIG.platePath}${item.code}`,
+      `https://${CONFIG.goDomain}${CONFIG.nfcPath}${item.code}`,
+      `https://${CONFIG.goDomain}${CONFIG.activationPath || '/atv/'}${item.code}`
+    ].map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(','));
+    downloadTextFile(`${batch.code}-MAPA-INTERNO.csv`, [header.join(','), ...lines].join('\n'), 'text/csv;charset=utf-8');
+  }
+
+  function showNewBatchModal() {
+    showModal(`<div class="modal-head"><div><div class="eyebrow">Produção em série</div><h2>Criar lote de plaquinhas</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="new-batch-form"><div class="modal-body stack"><div class="activation-notice"><strong>Padrão físico:</strong> cada unidade terá QR exclusivo <span class="mono">/q/TT-XXXXXX</span>. O NFC usa <span class="mono">/n/TT-XXXXXX</span> e a ativação usa <span class="mono">/atv/TT-XXXXXX</span>.</div><div class="form-grid"><div class="field"><label>Nome do lote</label><input class="input" name="label" maxlength="120" value="Produção TAJO TAP" required></div><div class="field"><label>Quantidade</label><input class="input" name="quantity" type="number" min="1" max="100" value="10" required><span class="field-help">De 1 a 100 unidades por lote.</span></div></div><div class="card card-pad" style="box-shadow:none;background:var(--surface-2)"><strong>Arquivo para gráfica</strong><p class="text-muted">O sistema gera QRs vetoriais com fundo branco, alto contraste e margem de segurança. O QR impresso é permanente.</p></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary" type="submit">Gerar lote ${ICONS.arrow}</button></div></form>`, true);
+  }
+
+  function showCreatedBatch(batch) {
+    state.lastBatch = batch;
+    const first = batch.items?.[0];
+    showModal(`<div class="modal-head"><div><div class="eyebrow">Lote criado</div><h2>${esc(batch.code)}</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body stack"><div class="destination-option active"><div class="destination-icon">${ICONS.check}</div><div class="destination-copy"><strong>${batch.quantity} plaquinhas prontas para produção</strong><span>Todos os QR Codes seguem o padrão permanente TAJO TAP.</span></div></div><div class="activation-notice"><strong>Importante:</strong> baixe o mapa interno de PINs agora. Os PINs não ficam armazenados em texto puro e não poderão ser recuperados depois.</div>${first?`<div class="form-grid"><div class="field"><label>Primeira unidade</label><input class="input mono" readonly value="${esc(first.code)}"></div><div class="field"><label>Primeiro PIN</label><input class="input mono" readonly value="${esc(first.activationCode)}"></div></div>`:''}</div><div class="modal-footer"><button class="btn btn-ghost" data-action="download-batch-map" data-id="${esc(batch.id)}">${ICONS.download} Mapa de PINs</button><button class="btn btn-ghost" data-action="download-batch-print" data-id="${esc(batch.id)}">${ICONS.download} Arquivo impressão</button><button class="btn btn-primary" data-action="print-batch" data-id="${esc(batch.id)}">${ICONS.printer} Salvar PDF / Imprimir</button></div>`);
   }
 
   function analyticsPage() {
@@ -880,6 +994,10 @@
     if(action==='go-sales') go('sales');
     if(action==='go-team-chat') go('team-chat');
     if(action==='new-seller-lead') showModal(`<div class="modal-head"><div><div class="eyebrow">CRM</div><h2>Novo lead</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="seller-lead-form"><div class="modal-body stack"><div class="field"><label>Negócio</label><input class="input" name="business_name" required></div><div class="form-grid"><div class="field"><label>Contato</label><input class="input" name="contact_name"></div><div class="field"><label>WhatsApp</label><input class="input" name="phone"></div></div><div class="form-grid"><div class="field"><label>Cidade</label><input class="input" name="city"></div><div class="field"><label>Nicho</label><input class="input" name="niche"></div></div><div class="field"><label>Instagram</label><input class="input" name="instagram"></div><div class="field"><label>Observações</label><textarea class="input" name="notes" rows="3"></textarea></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar lead</button></div></form>`);
+    if(action==='new-batch') showNewBatchModal();
+    if(action==='print-batch') printBatch(batchById(actionEl.dataset.id));
+    if(action==='download-batch-print') downloadBatchPrint(batchById(actionEl.dataset.id));
+    if(action==='download-batch-map') downloadBatchMap(batchById(actionEl.dataset.id));
     if(action==='new-seller-sale') showModal(`<div class="modal-head"><div><div class="eyebrow">Resultado</div><h2>Registrar venda</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="seller-sale-form"><div class="modal-body stack"><div class="field"><label>Cliente / estabelecimento</label><input class="input" name="customer_name" required></div><div class="form-grid"><div class="field"><label>Valor da venda (R$)</label><input class="input" name="amount" inputmode="decimal" placeholder="499,90" required></div><div class="field"><label>Status</label><select class="select" name="status"><option value="pending">Pendente</option><option value="paid">Pago</option></select></div></div><div class="field"><label>Observação</label><textarea class="input" name="notes" rows="3"></textarea></div><div class="activation-notice">Sua comissão será calculada automaticamente usando a taxa definida pela administração.</div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Registrar</button></div></form>`);
     if(action==='new-seller') showModal(`<div class="modal-head"><div><div class="eyebrow">Equipe</div><h2>Vincular vendedor</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="admin-seller-form"><div class="modal-body stack"><div class="activation-notice">A conta precisa existir primeiro em Supabase Auth → Users. Depois vincule pelo mesmo e-mail.</div><div class="field"><label>Nome</label><input class="input" name="full_name" required></div><div class="field"><label>E-mail da conta</label><input class="input" type="email" name="email" required></div><div class="form-grid"><div class="field"><label>WhatsApp</label><input class="input" name="phone"></div><div class="field"><label>Comissão (%)</label><input class="input" type="number" min="0" max="100" step="0.01" name="commission_rate" value="30" required></div></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Vincular vendedor</button></div></form>`);
     if(action==='approve-sale' && state.role==='admin'){try{await apiFetch('/api/admin/sellers',{method:'PATCH',body:{kind:'sale-status',sale_id:actionEl.dataset.id,status:'paid'}});await loadSellersAdmin();toast('Venda aprovada','A comissão agora entra nos resultados pagos.');render();}catch(err){toast('Não foi possível aprovar',err.message);}}
@@ -935,18 +1053,27 @@
         state.activation.completed=true;
         state.activation.sessionReady=Boolean(out.sessionReady);
         state.activation.confirmationRequired=Boolean(out.emailConfirmationRequired);
-        if(out.sessionReady){
-          const session=await apiFetch('/api/auth/me');
-          state.user=session.user||state.user;
-          state.sessionRole=session.role||state.sessionRole;
-          if(session.role==='admin'||session.role==='client'||session.role==='seller'){state.role=session.role;await refreshRoleData();}
-        }
+        // Sucesso da ativação não depende do refresh posterior do painel.
         toast('Plaquinha ativada','O QR Code já está direcionando para o destino escolhido.');
         render();
+        if(out.sessionReady){
+          try {
+            const session=await apiFetch('/api/auth/me');
+            state.user=session.user||state.user;
+            state.sessionRole=session.role||state.sessionRole;
+            if(session.role==='admin'||session.role==='client'||session.role==='seller'){
+              state.role=session.role;
+              await refreshRoleData();
+            }
+          } catch(refreshError) {
+            console.warn('[activation/post-success-refresh]', refreshError);
+            toast('Ativação concluída','A plaquinha foi ativada. Se o painel não atualizar, recarregue a página.');
+          }
+        }
       } catch(err) {
         if(err.code==='ACCOUNT_EXISTS'||err.code==='ACCOUNT_EXISTS_OR_INVALID'){ state.activation.accountMode='existing';state.activation.step=2; }
         if(['PIN_INVALID','PIN_LOCKED','PIN_EXPIRED','PIN_USED'].includes(err.code)){ state.activation.step=3; }
-        toast('Não foi possível ativar',err.message);
+        toast('Não foi possível ativar',`${err.message}${err.reference ? ` · Ref. ${err.reference}` : ''}`);
         render();
       } finally { state.busy=false; }
     }
@@ -973,6 +1100,17 @@
       e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target);
       try { const out=await apiFetch('/api/admin/plates',{method:'POST',body:{name:fd.get('name'),clientId:fd.get('client')||null,code:fd.get('code')}}); state.plaques.unshift(out.plate); showCreatedPlate(out.plate,out.activationCode); toast('Plaquinha criada',out.plate.code); }
       catch(err){ toast('Não foi possível criar',err.message); }
+    }
+    if(e.target.id==='new-batch-form'){
+      e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target);
+      const button=e.target.querySelector('button[type="submit"]'); if(button) button.disabled=true;
+      try {
+        const out=await apiFetch('/api/admin/batches',{method:'POST',body:{label:fd.get('label'),quantity:Number(fd.get('quantity'))}});
+        state.lastBatch=out.batch;
+        await Promise.all([loadAdminData(),loadProductionData()]);
+        showCreatedBatch(out.batch);
+        toast('Lote criado',`${out.batch.quantity} plaquinhas geradas com QR permanente.`);
+      } catch(err){ toast('Não foi possível criar o lote',err.message); if(button) button.disabled=false; }
     }
     if(e.target.id==='new-client-form'){
       e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target);
