@@ -18,12 +18,19 @@ $$;
 
 -- ---------- auth profile ----------
 create table if not exists public.profiles (
-  user_id uuid primary key references auth.users(id) on delete cascade,
+  id uuid primary key references auth.users(id) on delete cascade,
   full_name text,
   phone text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Compatibility with an existing profiles table from another TAJO project.
+-- The standard identity column is `id = auth.users.id`. Missing profile fields are added without deleting existing data.
+alter table public.profiles add column if not exists full_name text;
+alter table public.profiles add column if not exists phone text;
+alter table public.profiles add column if not exists created_at timestamptz not null default now();
+alter table public.profiles add column if not exists updated_at timestamptz not null default now();
 
 create or replace function public.handle_new_auth_user()
 returns trigger
@@ -32,13 +39,13 @@ security definer
 set search_path = public, auth, pg_temp
 as $$
 begin
-  insert into public.profiles (user_id, full_name, phone)
+  insert into public.profiles (id, full_name, phone)
   values (
     new.id,
     nullif(trim(coalesce(new.raw_user_meta_data ->> 'full_name', '')), ''),
     nullif(trim(coalesce(new.raw_user_meta_data ->> 'phone', '')), '')
   )
-  on conflict (user_id) do nothing;
+  on conflict (id) do nothing;
   return new;
 end;
 $$;
@@ -49,13 +56,13 @@ after insert on auth.users
 for each row execute function public.handle_new_auth_user();
 
 -- Backfill profiles if users were created before this migration.
-insert into public.profiles (user_id, full_name, phone)
+insert into public.profiles (id, full_name, phone)
 select
   u.id,
   nullif(trim(coalesce(u.raw_user_meta_data ->> 'full_name', '')), ''),
   nullif(trim(coalesce(u.raw_user_meta_data ->> 'phone', '')), '')
 from auth.users u
-on conflict (user_id) do nothing;
+on conflict (id) do nothing;
 
 drop trigger if exists profiles_updated_at on public.profiles;
 create trigger profiles_updated_at before update on public.profiles
@@ -314,11 +321,11 @@ alter table public.audit_logs enable row level security;
 -- Drop policies so the migration can be safely re-run after edits.
 drop policy if exists profiles_self_select on public.profiles;
 drop policy if exists profiles_self_update on public.profiles;
-create policy profiles_self_select on public.profiles for select to authenticated using (user_id = auth.uid());
-create policy profiles_self_update on public.profiles for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy profiles_self_select on public.profiles for select to authenticated using (id = auth.uid());
+create policy profiles_self_update on public.profiles for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
 
 drop policy if exists admins_self_select on public.platform_admins;
-create policy admins_self_select on public.platform_admins for select to authenticated using (user_id = auth.uid());
+create policy admins_self_select on public.platform_admins for select to authenticated using (id = auth.uid());
 
 drop policy if exists clients_member_select on public.clients;
 create policy clients_member_select on public.clients for select to authenticated

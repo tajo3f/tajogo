@@ -10,7 +10,7 @@ export default async function handler(req, res) {
     if (!user) return res.status(200).json({ ok: true, authenticated: false });
     const role = await resolveRole(user.id);
     if (role.role === 'unassigned') return res.status(200).json({ ok: true, authenticated: true, role: 'unassigned' });
-    const profiles = await supabaseRest(`profiles?user_id=eq.${encodeURIComponent(user.id)}&select=full_name,phone&limit=1`);
+    const profiles = await supabaseRest(`profiles?id=eq.${encodeURIComponent(user.id)}&select=full_name,phone&limit=1`);
     const profile = Array.isArray(profiles) ? profiles[0] : null;
     return res.status(200).json({
       ok: true,

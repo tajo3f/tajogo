@@ -289,3 +289,8 @@ Confira nesta ordem:
 ## 18. Se aparecer “Não foi possível abrir esta plaquinha”
 
 Olhe o `REF:` exibido na página e abra os Runtime Logs da Vercel. O backend também envia `X-Tajo-Error` com um código resumido.
+
+
+## Correção V3.1 — tabela `profiles` já existente
+
+Se seu projeto Supabase já possui `public.profiles`, não apague a tabela. A migration V3.1 foi preparada para reutilizar `profiles.id = auth.users.id` e acrescentar somente os campos necessários que estiverem ausentes. Execute novamente `supabase/migrations/001_tajo_tap_backend.sql` desde o início. Os comandos foram escritos para reexecução segura nas partes de criação/trigger/policies.
