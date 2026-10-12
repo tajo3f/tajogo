@@ -41,7 +41,8 @@
     camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 7h3l2-3h6l2 3h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="4"/></svg>',
     chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>',
     wifi: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M5 12.5a10 10 0 0 1 14 0M8 15.5a6 6 0 0 1 8 0M11 18.5a2 2 0 0 1 2 0"/><circle cx="12" cy="21" r="1" fill="currentColor" stroke="none"/></svg>',
-    lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>'
+    lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>'
   };
 
 
@@ -350,6 +351,7 @@
         <div class="stack">
           <section class="card card-pad"><div class="card-title"><div><h2>QR da plaquinha</h2><p>Use este QR na impressão do acrílico.</p></div></div><div class="qr-frame"><canvas class="qr-canvas" data-qr="${esc(qrUrl)}" width="512" height="512"></canvas></div><div class="qr-caption mono">${esc(qrUrl)}</div><div class="row wrap" style="justify-content:center;margin-top:16px"><button class="btn btn-ghost" data-action="download-qr" data-code="${esc(p.code)}">${ICONS.download} Baixar PNG</button><button class="btn btn-ghost" data-action="copy" data-copy="${esc(nfcUrl)}">${ICONS.wifi} Copiar NFC</button></div></section>
           <section class="card card-pad"><div class="card-title"><div><h3>Origem dos acessos</h3><p>QR e NFC são contabilizados separadamente.</p></div></div>${breakdown('QR Code',p.qr,p.scansTotal)}${breakdown('NFC / aproximação',p.nfc,p.scansTotal)}</section>
+          <section class="card card-pad danger-zone"><div class="card-title"><div><h3>Zona de risco</h3><p>Use somente para testes, unidades duplicadas ou plaquinhas que realmente devem deixar de existir.</p></div></div><div class="danger-zone-row"><div><strong>Excluir plaquinha permanentemente</strong><span>Remove a plaquinha, PIN, destinos e histórico de acessos vinculados. O cliente não é excluído.</span></div><button class="btn btn-danger" data-action="delete-plate" data-code="${esc(p.code)}">${ICONS.trash} Excluir plaquinha</button></div></section>
         </div>
       </div>`;
   }
@@ -630,6 +632,12 @@
     showModal(`<div class="modal-head"><div><div class="eyebrow">${esc(code)}</div><h2>Alterar destino</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="destination-form" data-code="${esc(code)}"><div class="modal-body"><p class="text-muted" style="margin-top:0">O QR Code e o NFC da plaquinha permanecem os mesmos.</p><div class="choice-grid" id="destination-choice-grid">${[['google','Avaliações Google'],['whatsapp','WhatsApp'],['instagram','Instagram'],['smart','Smart Page'],['map','Localização'],['custom','Outro link']].map(([id,n])=>`<button type="button" class="choice destination-modal-choice ${current===id?'active':''}" data-type="${id}">${destinationIcon(id)}<strong>${n}</strong><span>${id==='smart'?'Página inteligente TAJO':'Redirecionamento dinâmico'}</span></button>`).join('')}</div><input type="hidden" name="type" value="${current}"><div class="field"><label>Destino / configuração</label><input class="input" name="destination" value="${esc(p.destination)}" placeholder="https://..." required><span class="field-help">O backend valida o endereço antes de salvar. Use sempre um link HTTPS válido.</span></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar alteração</button></div></form>`);
   }
 
+
+  function deletePlateModal(code) {
+    const p=state.plaques.find(x=>x.code===code); if(!p || state.role!=='admin') return;
+    showModal(`<div class="modal-head"><div><div class="eyebrow text-danger">Exclusão permanente</div><h2>Excluir ${esc(p.code)}?</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal" aria-label="Fechar">${ICONS.close}</button></div><form id="delete-plate-form" data-code="${esc(p.code)}"><div class="modal-body stack"><div class="delete-warning"><div class="delete-warning-icon">${ICONS.trash}</div><div><strong>Esta ação não pode ser desfeita.</strong><span>A plaquinha será removida do sistema junto com PIN, destinos e histórico de acessos vinculados. A conta do cliente continuará existindo.</span></div></div><div class="field"><label>Para confirmar, digite <span class="mono">${esc(p.code)}</span></label><input class="input mono" name="confirmCode" autocomplete="off" spellcheck="false" placeholder="${esc(p.code)}" required><span class="field-help">Recomendado para unidades de teste, cadastros duplicados ou peças descartadas.</span></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-danger" type="submit">${ICONS.trash} Excluir permanentemente</button></div></form>`);
+  }
+
   function newClientModal() {
     showModal(`<div class="modal-head"><div><div class="eyebrow">Clientes</div><h2>Novo cliente</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="new-client-form"><div class="modal-body stack"><div class="field"><label>Empresa</label><input class="input" name="name" required placeholder="Nome do estabelecimento"></div><div class="form-grid"><div class="field"><label>Responsável</label><input class="input" name="contact" required></div><div class="field"><label>WhatsApp</label><input class="input" name="phone" inputmode="tel" required></div></div><div class="field"><label>Cidade / Estado</label><input class="input" name="city" required></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Cadastrar cliente</button></div></form>`);
   }
@@ -785,6 +793,7 @@
     if(action==='copy') copyText(actionEl.dataset.copy||'');
     if(action==='download-qr') downloadQR(actionEl.dataset.code);
     if(action==='edit-destination') editDestinationModal(actionEl.dataset.code);
+    if(action==='delete-plate') deletePlateModal(actionEl.dataset.code);
     if(action==='toggle-plate') { const p=state.plaques.find(x=>x.code===actionEl.dataset.code); if(p&&state.role==='admin'){ try{ const target=p.status==='paused'?'active':'paused'; const out=await apiFetch(`/api/admin/plate?code=${encodeURIComponent(p.code)}`,{method:'PATCH',body:{status:target}}); Object.assign(p,out.plate); toast('Status atualizado'); render(); }catch(err){ toast('Não foi possível atualizar',err.message); } } }
     if(action==='go-plaques') go('plaques');
     if(action==='go-analytics') go('analytics');
@@ -876,6 +885,17 @@
       e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target), p=state.plaques.find(x=>x.code===e.target.dataset.code); if(!p) return;
       try { const endpoint=state.role==='admin'?'/api/admin/destination':'/api/client/destination'; const out=await apiFetch(endpoint,{method:'POST',body:{code:p.code,type:fd.get('type'),url:fd.get('destination')}}); Object.assign(p,out.plate); closeModal();toast('Destino atualizado','A plaquinha física continua a mesma.');render(); }
       catch(err){toast('Não foi possível alterar',err.message);}
+    }
+    if(e.target.id==='delete-plate-form'){
+      e.preventDefault(); if(!e.target.reportValidity() || state.role!=='admin') return;
+      const fd=new FormData(e.target), code=e.target.dataset.code, confirmCode=String(fd.get('confirmCode')||'').trim().toUpperCase();
+      if(confirmCode!==code){ toast('Confirmação incorreta',`Digite exatamente ${code} para excluir.`); return; }
+      const submit=e.target.querySelector('button[type="submit"]'); if(submit) submit.disabled=true;
+      try {
+        await apiFetch(`/api/admin/plate?code=${encodeURIComponent(code)}`,{method:'DELETE',body:{confirmCode}});
+        state.plaques=state.plaques.filter(p=>p.code!==code);
+        closeModal(); toast('Plaquinha excluída',`${code} foi removida permanentemente.`); go('plaques');
+      } catch(err){ if(submit) submit.disabled=false; toast('Não foi possível excluir',err.message); }
     }
   });
 

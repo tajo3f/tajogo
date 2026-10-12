@@ -105,6 +105,17 @@ A migration principal agora usa `public.profiles.id` como referência ao `auth.u
 
 ## V3.3 — ativação única pelo cliente
 
-A V3.3 adiciona `supabase/migrations/002_plate_self_activation.sql`. O cliente recebe a plaquinha e o PIN, acessa automaticamente `/atv/TT-XXXXXX`, cria ou entra na conta, escolhe o destino e confirma. A ativação pública é então bloqueada no banco. Alterações futuras são feitas apenas pelo painel autenticado.
+A V3.3.2 usa uma única migration incremental: `supabase/migrations/002_plate_activation_flow.sql`. O cliente recebe a plaquinha e o PIN, acessa automaticamente `/atv/TT-XXXXXX`, cria ou entra na conta, escolhe o destino e confirma. A ativação pública é então bloqueada no banco. Alterações futuras são feitas apenas pelo painel autenticado.
 
-**Ordem de publicação:** execute primeiro a migration `002`, depois publique o código V3.3 e faça o redeploy na Vercel.
+**Ordem de publicação:** execute primeiro a migration `002`, depois publique o código V3.3.2 e faça o redeploy na Vercel.
+
+
+## V3.3.2 — correção migration 42P13
+
+A migration 002 agora remove e recria explicitamente as RPCs de ativação antes de defini-las. Isso corrige o erro PostgreSQL `42P13: cannot change return type of existing function` em bancos onde uma versão anterior da função já existia. A view administrativa também preserva as colunas antigas na mesma ordem e adiciona os novos campos somente no final.
+
+
+## Exclusão segura de plaquinhas (V3.3.2)
+O Super Admin pode excluir uma plaquinha permanentemente pela tela de gerenciamento. A confirmação exige digitar o código completo (ex.: `TT-YNGW64`). A exclusão é feita somente por endpoint administrativo autenticado e remove em cascata PIN, destinos e eventos de acesso vinculados; a conta/cliente não é apagada. Use para testes, duplicidades ou peças descartadas.
+
+Não há nova migration de banco nesta versão: as FKs da base já usam `ON DELETE CASCADE` para os dados vinculados à plaquinha.

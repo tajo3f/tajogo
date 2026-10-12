@@ -585,3 +585,17 @@ tbody tr:hover { background:var(--surface-2); }
   .activation-actions .btn { width:100%; }
   .activation-tabs { grid-template-columns:1fr; }
 }
+
+
+/* V3.3.2 — safe permanent plate deletion */
+.danger-zone { border-color: color-mix(in srgb, var(--danger) 28%, var(--line)); background: color-mix(in srgb, var(--danger) 3%, var(--surface)); }
+.danger-zone-row { display:flex; align-items:center; justify-content:space-between; gap:18px; }
+.danger-zone-row > div { display:grid; gap:5px; min-width:0; }
+.danger-zone-row strong { font-size:.93rem; }
+.danger-zone-row span { color:var(--muted); font-size:.82rem; line-height:1.5; max-width:560px; }
+.delete-warning { display:flex; gap:14px; align-items:flex-start; padding:16px; border:1px solid color-mix(in srgb, var(--danger) 30%, var(--line)); border-radius:16px; background:color-mix(in srgb, var(--danger) 6%, var(--surface)); }
+.delete-warning-icon { flex:0 0 auto; width:40px; height:40px; border-radius:12px; display:grid; place-items:center; color:var(--danger); background:color-mix(in srgb, var(--danger) 10%, transparent); }
+.delete-warning-icon svg { width:20px; height:20px; }
+.delete-warning > div:last-child { display:grid; gap:5px; }
+.delete-warning span { color:var(--muted); font-size:.84rem; line-height:1.5; }
+@media (max-width: 640px) { .danger-zone-row { align-items:stretch; flex-direction:column; } .danger-zone-row .btn { width:100%; } }

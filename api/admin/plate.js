@@ -7,7 +7,7 @@ const STATUSES = new Set(['unconfigured', 'active', 'paused', 'archived']);
 
 export default async function handler(req, res) {
   setNoStore(res);
-  if (!allowMethods(req, res, ['GET', 'PATCH'])) return;
+  if (!allowMethods(req, res, ['GET', 'PATCH', 'DELETE'])) return;
   try {
     const auth = await requireAdmin(req, res);
     if (!auth) return;
@@ -20,6 +20,34 @@ export default async function handler(req, res) {
     if (req.method === 'GET') return res.status(200).json({ ok: true, plate: mapPlate(current) });
 
     const body = readJson(req);
+
+    if (req.method === 'DELETE') {
+      const confirmCode = safePlateCode(body?.confirmCode);
+      if (!confirmCode || confirmCode !== current.code) {
+        return apiError(res, 400, 'DELETE_CONFIRMATION_INVALID', 'Digite o código completo da plaquinha para confirmar a exclusão.');
+      }
+
+      const snapshot = {
+        code: current.code,
+        name: current.name,
+        client_id: current.client_id || null,
+        status: current.status,
+        setup_status: current.setup_status || null,
+        configuration_locked: Boolean(current.configuration_locked),
+        owner_user_id: current.owner_user_id || null
+      };
+
+      await supabaseRest(`tap_plates?id=eq.${encodeURIComponent(current.id)}`, {
+        method: 'DELETE', headers: { Prefer: 'return=minimal' }
+      });
+
+      await supabaseRest('tap_audit_logs', {
+        method: 'POST', headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ actor_user_id: auth.user.id, action: 'plate.delete', entity_type: 'plate', entity_id: current.id, metadata: snapshot })
+      }).catch(() => null);
+
+      return res.status(200).json({ ok: true, deleted: { id: current.id, code: current.code } });
+    }
     const patch = {};
     if (body?.status !== undefined) {
       const status = text(body.status, 30);
@@ -52,6 +80,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, plate: mapPlate(updated?.[0]) });
   } catch (error) {
     console.error('[admin/plate]', { code: publicErrorCode(error), status: error?.status, detail: error?.detail });
-    return apiError(res, 503, publicErrorCode(error), 'Não foi possível atualizar a plaquinha.');
+    return apiError(res, 503, publicErrorCode(error), req.method === 'DELETE' ? 'Não foi possível excluir a plaquinha.' : 'Não foi possível atualizar a plaquinha.');
   }
 }
