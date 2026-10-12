@@ -1,59 +1,61 @@
-# QA — TAJO TAP Frontend V1
+# QA — TAJO TAP Full Stack V3
 
-## Validações automatizadas executadas
+## Automatizado neste pacote
 
-- `node --check assets/js/config.js`;
-- `node --check assets/js/qr-core.js`;
-- `node --check assets/js/app.js`;
-- verificação de todos os assets locais referenciados pelo HTML;
-- verificação de IDs duplicados no HTML estático;
-- teste isolado do encoder QR gerando matriz válida.
+- sintaxe de todos os arquivos JS/MJS próprios;
+- referências de assets do frontend;
+- encoder QR gerando matriz válida;
+- integridade do ZIP final;
+- verificação de imports internos;
+- checagem de que o frontend não contém `SUPABASE_SECRET_KEY`;
+- checagem de que dados de negócio não usam mais `tajoTapState` no `localStorage`.
 
-## Viewports considerados no CSS
+Execute novamente a qualquer momento:
+
+```bash
+npm test
+```
+
+## Checklist após configurar o Supabase
+
+1. `/api/health` retorna `ok: true`.
+2. Login do super admin funciona.
+3. Criar cliente grava uma linha em `clients`.
+4. Criar plaquinha grava uma linha em `plates`.
+5. QR gerado possui o mesmo código salvo no banco.
+6. Alterar destino cria `plate_destinations` e ativa `current_destination_id`.
+7. Abrir `/t/TT-XXXXXX` redireciona corretamente.
+8. Abrir `/q/` e `/n/` incrementa analytics com origens diferentes.
+9. Pausar a placa impede redirect.
+10. Usuário de cliente não consegue acessar `/api/admin/*`.
+11. Cliente enxerga apenas placas do próprio `client_id`.
+12. Secret key nunca aparece em View Source/DevTools Network do navegador.
+
+## Viewports
+
+Testar no deploy real em:
 
 - 320px;
 - 360px;
 - 390px;
 - 414px;
-- 520px;
-- 720px;
-- 860px;
-- 1180px;
-- desktops largos.
-
-## Checklist manual recomendado antes do deploy público
-
-### Mobile
-- login em 320/360/390/414px;
-- dashboard;
-- bottom navigation;
-- cards de plaquinha;
-- modal de criação;
-- modal de destino;
-- scanner;
-- teclado virtual em inputs;
-- safe area em iPhone.
-
-### Tablet
-- 768x1024;
-- 820x1180;
-- modo retrato/paisagem.
-
-### Desktop
+- 768px;
 - 1024px;
 - 1280px;
 - 1440px;
 - 1920px.
 
-### Scanner
+## Scanner
+
+Testar em HTTPS:
+
 - Chrome Android;
 - Safari iPhone;
 - Chrome desktop com webcam;
 - permissão negada;
 - dispositivo sem câmera;
-- código inválido;
-- código manual.
+- QR válido;
+- código manual;
+- imagem com QR.
 
-## Limite conhecido desta etapa
-
-O ambiente de geração bloqueia navegação local pelo Chromium por política organizacional, portanto não foi possível concluir captura visual automatizada real no navegador dentro deste ambiente. O código foi validado estaticamente e o QR encoder foi executado isoladamente. A validação visual final deve ser feita no deploy Vercel/localhost real antes de conectar o backend.
+A API `BarcodeDetector` não é uniforme em todos os navegadores; o campo manual e leitura por imagem permanecem como fallback onde suportado.

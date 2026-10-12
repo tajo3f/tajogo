@@ -1,62 +1,93 @@
-# TAJO TAP — Redirect Patch V2
+# TAJO TAP — Full Stack V3
 
-Corrige o erro 503 **“Não foi possível abrir esta plaquinha”** que pode ocorrer quando uma chave nova `sb_secret_...` do Supabase é enviada incorretamente como `Authorization: Bearer`.
+Sistema integrado para **QR Code dinâmico + NFC**, com painel administrativo, clientes, portal de cliente, scanner, analytics e motor de redirecionamento.
 
-## Correção principal
+## Stack
 
-As chaves `sb_secret_...` são API keys opacas, não JWTs. Esta versão envia a chave nova somente no header:
+- Frontend: HTML + CSS + JavaScript Vanilla
+- Backend: Vercel Functions (Node.js 24)
+- Banco: Supabase PostgreSQL
+- Auth: Supabase Auth
+- Segurança: cookies HttpOnly + autorização no backend + RLS no banco
+- Deploy: GitHub + Vercel
 
-```text
-apikey: sb_secret_...
-```
+## Domínios planejados
 
-O header `Authorization: Bearer ...` só é usado automaticamente se a chave configurada for uma chave legada JWT `service_role` iniciada por `eyJ`.
+- `painel.tajodigital.com.br` → painel TAJO TAP
+- `go.tajodigital.com.br` → QR/NFC dinâmico
+- `tajodigital.com.br` → site institucional TAJO
 
-## Rotas
+O mesmo projeto Vercel pode receber `painel.` e `go.`. As rotas `/q/`, `/n/` e `/t/` são resolvidas por Vercel Functions.
 
-- `/q/TT-XXXXXXXX` → QR
-- `/n/TT-XXXXXXXX` → NFC
-- `/t/TT-XXXXXXXX` → compatibilidade com links já gerados
-- `/api/health` → testa a função **e a conexão real com o Supabase**
+## O que mudou em relação ao frontend antigo
 
-## Variáveis Vercel
+O protótipo antigo guardava plaquinhas no `localStorage`, portanto uma placa criada no computador não existia no celular. Esta versão salva os dados no Supabase e o redirect consulta o banco em cada acesso.
 
-```env
-SUPABASE_URL=https://SEU-PROJETO.supabase.co
-SUPABASE_SECRET_KEY=sb_secret_...
-PANEL_BASE_URL=https://painel.tajodigital.com.br
-```
-
-Depois de alterar Environment Variables, faça um **Redeploy**.
-
-## Teste obrigatório
-
-Abra:
+Fluxo real:
 
 ```text
-https://go.tajodigital.com.br/api/health
+painel → cria plaquinha → Supabase
+QR/NFC → go.tajodigital.com.br/t/TT-XXXXXX
+       → Vercel Function
+       → Supabase
+       → destino atual
+       → redirect
 ```
 
-Resultado esperado:
+## Instalação
 
-```json
-{
-  "ok": true,
-  "service": "tajo-tap-redirect",
-  "supabase": "connected"
-}
+Leia **BACKEND-SETUP.md** e siga exatamente a ordem.
+
+## Testes locais de código
+
+```bash
+npm test
 ```
 
-Se `supabase` aparecer como `disconnected`, confira o campo `error` e os Runtime Logs da Vercel.
+O projeto não possui dependências npm de runtime. Para simular as Functions localmente use Vercel CLI:
 
-## Fluxo
+```bash
+npx vercel dev
+```
 
-- `inventory` / `unconfigured` → painel de ativação
-- `active` + destino válido → registra analytics e redireciona
-- `paused` → página de pausa
-- `archived` → HTTP 410
-- inexistente → 404 TAJO TAP
+Crie `.env.local` a partir de `.env.example` somente no ambiente local. Nunca envie segredos ao GitHub.
 
-## Segurança
+## Rotas principais
 
-`SUPABASE_SECRET_KEY` é segredo de backend e ignora RLS. Nunca coloque esta chave em HTML, JavaScript do navegador, `NEXT_PUBLIC_*` ou repositório público.
+### Públicas
+
+- `GET /q/TT-XXXXXX` — acesso QR
+- `GET /n/TT-XXXXXX` — acesso NFC
+- `GET /t/TT-XXXXXX` — compatibilidade / link padrão
+- `GET /api/health` — teste de backend
+- `GET /api/public/plate?code=TT-XXXXXX` — estado público mínimo da placa
+
+### Auth
+
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `GET /api/auth/me`
+
+### Admin
+
+- `GET/POST /api/admin/clients`
+- `GET/POST /api/admin/plates`
+- `GET/PATCH /api/admin/plate?code=...`
+- `POST /api/admin/destination`
+
+### Cliente
+
+- `GET /api/client/plates`
+- `POST /api/client/destination`
+
+## Status da plaquinha
+
+- `inventory` — estoque
+- `unconfigured` — criada, aguardando destino
+- `active` — redirecionando normalmente
+- `paused` — temporariamente pausada
+- `archived` — retirada de operação
+
+## Observação sobre ativação do cliente
+
+Nesta versão, clientes podem alterar destinos quando possuem uma conta do Supabase vinculada ao estabelecimento em `client_members`. O vínculo pode ser criado com `supabase/LINK_CLIENT_USER.sql`. A geração automática de convites por e-mail pode ser adicionada depois sem alterar a arquitetura central.

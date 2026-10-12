@@ -29,6 +29,14 @@ function htmlPage(title, text, status = 200, reference = '') {
   };
 }
 
+function deviceType(userAgent = '') {
+  const ua = String(userAgent || '').toLowerCase();
+  if (!ua) return 'unknown';
+  if (/ipad|tablet|kindle|silk/.test(ua)) return 'tablet';
+  if (/mobi|iphone|android/.test(ua)) return 'mobile';
+  return 'desktop';
+}
+
 function sendHtml(res, page) {
   Object.entries(HTML_HEADERS).forEach(([key, value]) => res.setHeader(key, value));
   return res.status(page.status).send(page.body);
@@ -96,7 +104,8 @@ export default async function handler(req, res) {
           body: JSON.stringify({
             plate_id: plate.id,
             destination_id: destination.id,
-            source
+            source,
+            device_type: deviceType(req.headers['user-agent'])
           })
         });
       } catch (analyticsError) {

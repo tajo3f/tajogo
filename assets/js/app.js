@@ -1,6 +1,6 @@
-/* TAJO TAP Frontend V1
- * Frontend-only prototype: data is stored locally for UX validation.
- * Supabase/Auth/RLS/redirect engine will be connected in the backend phase.
+/* TAJO TAP Frontend + Backend V3
+ * Production-oriented SPA connected to Vercel Functions + Supabase.
+ * Sensitive Supabase keys stay server-side; browser talks only to same-origin /api routes.
  */
 (function () {
   'use strict';
@@ -44,34 +44,24 @@
     lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>'
   };
 
-  const samplePlaques = [
-    { id: 'p1', code: 'TT-7K2P9A', name: 'Balcão principal', client: 'Restaurante Central', clientId: 'c1', status: 'active', destinationType: 'google', destinationLabel: 'Avaliações Google', destination: 'https://search.google.com/local/writereview?placeid=EXEMPLO', scansToday: 18, scansMonth: 438, scansTotal: 1827, qr: 1192, nfc: 635 },
-    { id: 'p2', code: 'TT-M8X4QL', name: 'Caixa 01', client: 'Mercado Exemplo', clientId: 'c2', status: 'active', destinationType: 'whatsapp', destinationLabel: 'WhatsApp', destination: 'https://wa.me/5527999999999', scansToday: 11, scansMonth: 291, scansTotal: 912, qr: 612, nfc: 300 },
-    { id: 'p3', code: 'TT-P3W7RT', name: 'Recepção', client: 'Studio Aurora', clientId: 'c3', status: 'active', destinationType: 'smart', destinationLabel: 'Smart Page', destination: `https://${CONFIG.goDomain}/p/studio-aurora`, scansToday: 7, scansMonth: 173, scansTotal: 648, qr: 401, nfc: 247 },
-    { id: 'p4', code: 'TT-V4N8DK', name: 'Plaquinha nova', client: 'Não vinculado', clientId: null, status: 'unconfigured', destinationType: null, destinationLabel: 'Aguardando configuração', destination: '', scansToday: 0, scansMonth: 0, scansTotal: 0, qr: 0, nfc: 0 },
-    { id: 'p5', code: 'TT-A6Q3ZS', name: 'Mesa 04', client: 'Restaurante Central', clientId: 'c1', status: 'paused', destinationType: 'google', destinationLabel: 'Avaliações Google', destination: 'https://search.google.com/local/writereview?placeid=EXEMPLO', scansToday: 0, scansMonth: 94, scansTotal: 307, qr: 198, nfc: 109 }
-  ];
 
-  const sampleClients = [
-    { id: 'c1', name: 'Restaurante Central', contact: 'Responsável comercial', phone: '(27) 99999-0001', city: 'Afonso Cláudio — ES', plates: 2, scans: 2134, status: 'active' },
-    { id: 'c2', name: 'Mercado Exemplo', contact: 'Gerência', phone: '(27) 99999-0002', city: 'Afonso Cláudio — ES', plates: 1, scans: 912, status: 'active' },
-    { id: 'c3', name: 'Studio Aurora', contact: 'Atendimento', phone: '(27) 99999-0003', city: 'Venda Nova — ES', plates: 1, scans: 648, status: 'active' }
-  ];
-
-  const persisted = safeParse(localStorage.getItem('tajoTapState')) || {};
+  const persisted = safeParse(localStorage.getItem('tajoTapPrefs')) || {};
   const state = {
-    role: persisted.role || null,
+    role: null,
+    user: null,
+    authReady: false,
     theme: persisted.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
-    plaques: Array.isArray(persisted.plaques) ? persisted.plaques : samplePlaques,
-    clients: sampleClients,
+    plaques: [],
+    clients: [],
     sidebarOpen: false,
-    activation: { step: 1, selected: 'google', code: 'TT-V4N8DK' },
+    busy: false,
+    activation: { step: 1, selected: 'google', code: '', value: '', message: '' },
     scanner: { stream: null, raf: null, detector: null, running: false }
   };
 
   function safeParse(value) { try { return JSON.parse(value); } catch { return null; } }
   function saveState() {
-    localStorage.setItem('tajoTapState', JSON.stringify({ role: state.role, theme: state.theme, plaques: state.plaques }));
+    localStorage.setItem('tajoTapPrefs', JSON.stringify({ theme: state.theme }));
   }
   function setTheme(theme) {
     state.theme = theme;
@@ -79,6 +69,61 @@
     saveState();
   }
   setTheme(state.theme);
+
+  async function apiFetch(url, options = {}) {
+    const init = { credentials: 'same-origin', ...options, headers: { ...(options.headers || {}) } };
+    if (init.body && typeof init.body !== 'string') {
+      init.headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(init.body);
+    }
+    const response = await fetch(url, init);
+    let payload = null;
+    try { payload = await response.json(); } catch { payload = null; }
+    if (!response.ok || payload?.ok === false) {
+      const error = new Error(payload?.message || 'Não foi possível concluir a operação.');
+      error.status = response.status;
+      error.code = payload?.error || 'REQUEST_FAILED';
+      throw error;
+    }
+    return payload || { ok: true };
+  }
+
+  async function loadAdminData() {
+    const [platesResult, clientsResult] = await Promise.all([
+      apiFetch('/api/admin/plates'),
+      apiFetch('/api/admin/clients')
+    ]);
+    state.plaques = Array.isArray(platesResult.plates) ? platesResult.plates : [];
+    state.clients = Array.isArray(clientsResult.clients) ? clientsResult.clients : [];
+  }
+
+  async function loadClientData() {
+    const result = await apiFetch('/api/client/plates');
+    state.plaques = Array.isArray(result.plates) ? result.plates : [];
+    state.clients = [];
+  }
+
+  async function refreshRoleData() {
+    if (state.role === 'admin') return loadAdminData();
+    if (state.role === 'client') return loadClientData();
+  }
+
+  async function bootstrap() {
+    try {
+      const session = await apiFetch('/api/auth/me');
+      if (session.authenticated && (session.role === 'admin' || session.role === 'client')) {
+        state.role = session.role;
+        state.user = session.user || null;
+        await refreshRoleData();
+      }
+    } catch (error) {
+      console.error('[TAJO TAP bootstrap]', error);
+    } finally {
+      state.authReady = true;
+      render();
+    }
+  }
+
 
   function route() {
     const raw = location.hash.replace(/^#\/?/, '') || (state.role ? 'dashboard' : 'login');
@@ -119,13 +164,22 @@
 
   function render() {
     const r = route();
+    if (!state.authReady) return renderLoading();
     document.body.classList.toggle('is-auth', r.name === 'login');
     if (r.name === 'login') return renderLogin();
-    if (r.name === 'activate') return renderActivation(r.param || 'TT-V4N8DK');
-    if (r.name === 'portal') return renderPortal();
+    if (r.name === 'activate') return renderActivation(r.param || '');
     if (!state.role) return go('login');
+    if (state.role === 'client') {
+      if (r.name !== 'portal') return go('portal');
+      return renderPortal();
+    }
+    if (r.name === 'portal') return go('dashboard');
     app.innerHTML = shell(renderPage(r), r.name);
     bindPageEnhancements(r);
+  }
+
+  function renderLoading() {
+    app.innerHTML = `<main class="auth-shell"><section class="auth-brand" aria-label="TAJO TAP"><img class="auth-brand-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"><div class="auth-copy"><div class="auth-kicker">Conectando</div><h1>Preparando sua central.</h1><p>Validando sua sessão e sincronizando as plaquinhas com o backend TAJO TAP.</p></div></section><section class="auth-panel"><div class="auth-card"><div class="eyebrow">Aguarde</div><h2>Carregando dados...</h2><p>A conexão segura com o Supabase está sendo verificada.</p></div></section></main>`;
   }
 
   function renderLogin() {
@@ -139,7 +193,7 @@
             <p>Gerencie QR Codes e NFC dinâmicos, altere destinos sem reimprimir a placa e acompanhe cada acesso em uma experiência criada para a TAJO.</p>
             <div class="auth-proof"><span>QR dinâmico</span><span>NFC</span><span>Analytics</span><span>Smart Page</span></div>
           </div>
-          <small style="position:relative;z-index:1;color:#68716a">TAJO Digital 3F · Frontend V1</small>
+          <small style="position:relative;z-index:1;color:#68716a">TAJO Digital 3F · Operação segura</small>
         </section>
         <section class="auth-panel">
           <div class="auth-card">
@@ -148,16 +202,11 @@
             <h2>Bem-vindo ao TAJO TAP</h2>
             <p>Entre para gerenciar plaquinhas, clientes e direcionamentos.</p>
             <form id="login-form" class="stack" novalidate>
-              <div class="field"><label for="email">E-mail</label><input class="input" id="email" type="email" autocomplete="email" value="admin@tajodigital.com.br" required></div>
-              <div class="field"><label for="password">Senha</label><input class="input" id="password" type="password" autocomplete="current-password" value="demonstracao" minlength="8" required></div>
+              <div class="field"><label for="email">E-mail</label><input class="input" id="email" name="email" type="email" autocomplete="email" placeholder="seuemail@empresa.com.br" required></div>
+              <div class="field"><label for="password">Senha</label><input class="input" id="password" name="password" type="password" autocomplete="current-password" placeholder="Sua senha" minlength="8" required></div>
               <button class="btn btn-primary" type="submit">Entrar no painel ${ICONS.arrow}</button>
             </form>
-            <div class="auth-separator">demonstração do frontend</div>
-            <div class="auth-actions">
-              <button class="btn btn-ghost" type="button" data-action="demo-admin">Abrir como administrador</button>
-              <button class="btn btn-ghost" type="button" data-action="demo-client">Visualizar área do cliente</button>
-            </div>
-            <div class="demo-note">Nesta primeira etapa os dados são demonstrativos e ficam no navegador. A autenticação real e o banco serão conectados ao Supabase na etapa de backend.</div>
+            <div class="demo-note">Acesso protegido. Sua sessão é validada pelo backend e as chaves administrativas do Supabase nunca são enviadas ao navegador.</div>
           </div>
         </section>
       </main>`;
@@ -181,7 +230,7 @@
           <nav class="nav-group" aria-label="Navegação principal"><div class="nav-label">Operação</div>${navHtml}</nav>
           <div class="sidebar-spacer"></div>
           <div class="sidebar-help"><strong>Precisa localizar uma placa?</strong><p>Abra a câmera e escaneie o QR Code físico.</p><button class="btn btn-soft btn-sm" data-action="open-scanner">${ICONS.scan} Escanear agora</button></div>
-          <div class="sidebar-user"><div class="avatar">JP</div><div class="meta"><strong>João Paulo</strong><span>Administrador</span></div><button class="btn btn-icon btn-sm btn-ghost" data-action="logout" aria-label="Sair">${ICONS.logout}</button></div>
+          <div class="sidebar-user"><div class="avatar">${esc(userInitials())}</div><div class="meta"><strong>${esc(state.user?.name || 'Administrador')}</strong><span>Administrador</span></div><button class="btn btn-icon btn-sm btn-ghost" data-action="logout" aria-label="Sair">${ICONS.logout}</button></div>
         </aside>
         <div class="drawer-backdrop ${state.sidebarOpen ? 'show':''}" data-action="close-sidebar"></div>
         <div class="app-main">
@@ -230,9 +279,9 @@
     return `
       ${pageHead('Painel administrativo','Controle que vira resultado.','Acompanhe as plaquinhas, encontre pontos que precisam de atenção e altere destinos sem tocar na peça física.', `<button class="btn btn-ghost" data-action="open-scanner">${ICONS.scan} Escanear placa</button><button class="btn btn-primary" data-action="new-plaque">${ICONS.plus} Nova plaquinha</button>`)}
       <section class="metric-grid" aria-label="Indicadores principais">
-        ${metric('Plaquinhas ativas',active,'+2 neste mês','plate')}
-        ${metric('Acessos no mês',formatNumber(month),'+18% vs. período anterior','analytics')}
-        ${metric('Clientes ativos',state.clients.length,'Operação demonstrativa','clients')}
+        ${metric('Plaquinhas ativas',active,`${state.plaques.filter(p=>p.status==='unconfigured').length} aguardando configuração`,'plate')}
+        ${metric('Acessos no mês',formatNumber(month),'Dados registrados pelo redirect','analytics')}
+        ${metric('Clientes ativos',state.clients.filter(c=>c.status==='active').length,'Base sincronizada','clients')}
         ${metric('Acessos acumulados',formatNumber(total),'QR + NFC','scan')}
       </section>
       <section class="dashboard-grid">
@@ -248,10 +297,7 @@
         <div class="card card-pad">
           <div class="card-title"><div><h2>Atividade recente</h2><p>Últimas alterações da operação.</p></div><span class="chip">Agora</span></div>
           <div class="activity-list">
-            ${activity('Destino alterado','TT-7K2P9A · Google Reviews','link','há 8 min')}
-            ${activity('Nova plaquinha','TT-V4N8DK · aguardando configuração','plate','há 1 h')}
-            ${activity('Pico de acessos','Restaurante Central · +31% hoje','analytics','há 3 h')}
-            ${activity('Cliente cadastrado','Studio Aurora','clients','ontem')}
+            ${state.plaques.slice(0,4).map(p=>activity(p.status==='unconfigured'?'Plaquinha criada':'Plaquinha sincronizada',`${p.code} · ${p.client}`,p.status==='unconfigured'?'plate':'link',p.createdAt?new Date(p.createdAt).toLocaleDateString('pt-BR'):'agora')).join('') || '<div class="empty-state"><strong>Nenhuma plaquinha cadastrada.</strong><span>Crie a primeira unidade para iniciar a operação.</span></div>'}
           </div>
         </div>
       </section>`;
@@ -274,7 +320,8 @@
   }
 
   function plaqueDetail(code) {
-    const p = state.plaques.find(x=>x.code===code) || state.plaques[0];
+    const p = state.plaques.find(x=>x.code===code);
+    if(!p) return notFoundPage();
     const url = `https://${CONFIG.goDomain}${CONFIG.platePath}${p.code}`;
     return `
       ${pageHead('Plaquinha','Gerenciar '+esc(p.code),esc(p.name)+' · '+esc(p.client), `<button class="btn btn-ghost" data-action="copy" data-copy="${esc(url)}">${ICONS.copy} Copiar link</button><button class="btn btn-primary" data-action="edit-destination" data-code="${esc(p.code)}">${ICONS.edit} Alterar destino</button>`)}
@@ -299,47 +346,48 @@
   function scannerPage() {
     return `
       ${pageHead('Scanner','Localize qualquer plaquinha.','Abra a câmera, aponte para o QR Code e o sistema encontra a unidade para você.', `<button class="btn btn-primary" data-action="open-scanner">${ICONS.camera} Abrir câmera</button>`)}
-      <section class="scanner-launch"><div><div class="eyebrow" style="color:var(--brand)">Scan inteligente</div><h2>Escaneie. Identifique. Gerencie.</h2><p>Ideal para suporte, instalação e manutenção em campo. O leitor reconhece links do padrão <span class="mono">${esc(CONFIG.goDomain + CONFIG.platePath + "CODIGO")}</span> e abre a plaquinha encontrada.</p><div class="row wrap" style="margin-top:22px"><button class="btn btn-primary" data-action="open-scanner">${ICONS.camera} Usar câmera</button><button class="btn btn-ghost" style="border-color:#334037;color:#fff" data-action="simulate-scan">Testar com placa demo</button></div></div><div class="scanner-visual"><img src="assets/images/tajo-tap-mark.png" alt=""></div></section>
+      <section class="scanner-launch"><div><div class="eyebrow" style="color:var(--brand)">Scan inteligente</div><h2>Escaneie. Identifique. Gerencie.</h2><p>Ideal para suporte, instalação e manutenção em campo. O leitor reconhece links do padrão <span class="mono">${esc(CONFIG.goDomain + CONFIG.platePath + "CODIGO")}</span> e abre a plaquinha encontrada.</p><div class="row wrap" style="margin-top:22px"><button class="btn btn-primary" data-action="open-scanner">${ICONS.camera} Usar câmera</button></div></div><div class="scanner-visual"><img src="assets/images/tajo-tap-mark.png" alt=""></div></section>
       <div class="card card-pad" style="margin-top:18px"><div class="card-title"><div><h2>Também dá para buscar manualmente</h2><p>Útil quando a câmera estiver indisponível ou o código estiver impresso no verso.</p></div></div><form id="manual-scan-form" class="row wrap"><input class="input" style="flex:1;min-width:220px" name="code" placeholder="Ex.: TT-7K2P9A" autocomplete="off"><button class="btn btn-dark">Localizar ${ICONS.arrow}</button></form></div>`;
   }
 
   function clientsPage() {
-    const rows = state.clients.map(c=>`<tr><td><div class="entity"><div class="entity-icon">${esc(c.name[0])}</div><div class="entity-copy"><strong>${esc(c.name)}</strong><span>${esc(c.city)}</span></div></div></td><td>${esc(c.contact)}</td><td>${esc(c.phone)}</td><td>${c.plates}</td><td>${formatNumber(c.scans)}</td><td><span class="badge badge-success">Ativo</span></td></tr>`).join('');
-    const cards = state.clients.map(c=>`<article class="card mobile-card"><div class="mobile-card-head"><div class="entity"><div class="entity-icon">${esc(c.name[0])}</div><div class="entity-copy"><strong>${esc(c.name)}</strong><span>${esc(c.city)}</span></div></div><span class="badge badge-success">Ativo</span></div><div class="mobile-card-meta"><div><span>Plaquinhas</span><strong>${c.plates}</strong></div><div><span>Acessos</span><strong>${formatNumber(c.scans)}</strong></div></div><button class="btn btn-ghost" style="width:100%">Ver cliente ${ICONS.arrow}</button></article>`).join('');
+    const rows = state.clients.map(c=>`<tr><td><div class="entity"><div class="entity-icon">${esc(c.name[0])}</div><div class="entity-copy"><strong>${esc(c.name)}</strong><span>${esc(c.city)}</span></div></div></td><td>${esc(c.contact)}</td><td>${esc(c.phone)}</td><td>${c.plates}</td><td>${formatNumber(c.scans)}</td><td>${c.status==='active'?'<span class="badge badge-success">Ativo</span>':'<span class="badge badge-muted">Inativo</span>'}</td></tr>`).join('');
+    const cards = state.clients.map(c=>`<article class="card mobile-card"><div class="mobile-card-head"><div class="entity"><div class="entity-icon">${esc(c.name[0])}</div><div class="entity-copy"><strong>${esc(c.name)}</strong><span>${esc(c.city)}</span></div></div>${c.status==='active'?'<span class="badge badge-success">Ativo</span>':'<span class="badge badge-muted">Inativo</span>'}</div><div class="mobile-card-meta"><div><span>Plaquinhas</span><strong>${c.plates}</strong></div><div><span>Acessos</span><strong>${formatNumber(c.scans)}</strong></div></div><button class="btn btn-ghost" style="width:100%">Ver cliente ${ICONS.arrow}</button></article>`).join('');
     return `${pageHead('Relacionamento','Clientes','Centralize quem possui plaquinhas e acompanhe o uso por estabelecimento.', `<button class="btn btn-primary" data-action="new-client">${ICONS.plus} Novo cliente</button>`)}<div class="toolbar"><div class="grow input-with-icon">${ICONS.search}<input class="input" placeholder="Buscar cliente"></div></div><div class="table-wrap"><table><thead><tr><th>Cliente</th><th>Contato</th><th>Telefone</th><th>Placas</th><th>Acessos</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div><div class="mobile-list">${cards}</div>`;
   }
 
   function analyticsPage() {
+    const month=state.plaques.reduce((s,p)=>s+p.scansMonth,0);
+    const total=state.plaques.reduce((s,p)=>s+p.scansTotal,0);
+    const qr=state.plaques.reduce((s,p)=>s+p.qr,0);
+    const nfc=state.plaques.reduce((s,p)=>s+p.nfc,0);
+    const qrPct=total?Math.round(qr/total*100):0;
+    const nfcPct=total?Math.round(nfc/total*100):0;
+    const top=[...state.plaques].sort((a,b)=>b.scansTotal-a.scansTotal).slice(0,6);
+    const destinationTotals={};
+    state.plaques.forEach(p=>{ const key=p.destinationLabel||'Sem destino'; destinationTotals[key]=(destinationTotals[key]||0)+p.scansTotal; });
+    const destinations=Object.entries(destinationTotals).sort((a,b)=>b[1]-a[1]).slice(0,5);
     return `
-      ${pageHead('Mensuração','Analytics','Veja como QR e NFC estão sendo usados sem transformar o painel em um monte de gráficos sem decisão.', `<button class="btn btn-ghost">Últimos 30 dias</button>`)}
-      <section class="metric-grid">${metric('Acessos',formatNumber(996),'+18%','analytics')}${metric('QR Code','67%','667 acessos','scan')}${metric('NFC','33%','329 acessos','wifi')}${metric('Melhor horário','12h–13h','Pico de uso','dashboard')}</section>
+      ${pageHead('Mensuração','Analytics','Dados registrados pelo motor de redirecionamento do TAJO TAP.', '')}
+      <section class="metric-grid">${metric('Acessos no mês',formatNumber(month),'Mês atual','analytics')}${metric('QR Code',`${qrPct}%`,`${formatNumber(qr)} acessos acumulados`,'scan')}${metric('NFC',`${nfcPct}%`,`${formatNumber(nfc)} acessos acumulados`,'wifi')}${metric('Total histórico',formatNumber(total),'Todos os acessos','dashboard')}</section>
       <section class="analytics-grid" style="margin-top:18px">
-        <div class="card card-pad"><div class="card-title"><div><h2>Acessos nos últimos 14 dias</h2><p>Tendência geral da operação.</p></div><span class="chip">Atualizado agora</span></div>${analyticsChart()}</div>
-        <div class="card card-pad"><div class="card-title"><div><h2>Distribuição</h2><p>De onde os acessos vieram.</p></div></div><div class="breakdown">${breakdown('QR Code',667,996)}${breakdown('NFC',329,996)}${breakdown('Google Reviews',542,996)}${breakdown('WhatsApp',287,996)}</div></div>
+        <div class="card card-pad"><div class="card-title"><div><h2>Top plaquinhas</h2><p>Unidades com maior volume acumulado.</p></div><span class="chip">Supabase</span></div><div class="breakdown">${top.map(p=>breakdown(`${p.code} · ${p.name}`,p.scansTotal,Math.max(total,1))).join('') || '<div class="empty-state"><strong>Sem acessos ainda.</strong><span>Os dados aparecerão após os primeiros scans.</span></div>'}</div></div>
+        <div class="card card-pad"><div class="card-title"><div><h2>Destinos mais usados</h2><p>Distribuição por destino atual das plaquinhas.</p></div></div><div class="breakdown">${destinations.map(([label,value])=>breakdown(label,value,Math.max(total,1))).join('') || '<div class="empty-state"><strong>Nenhum destino ativo.</strong><span>Configure uma plaquinha para começar.</span></div>'}</div></div>
       </section>`;
   }
 
-  function analyticsChart() {
-    const vals=[38,52,43,61,58,71,68,82,76,91,84,99,107,121];
-    const w=780,h=300,p=28,max=Math.max(...vals),min=Math.min(...vals);
-    const pts=vals.map((v,i)=>{const x=p+i*((w-p*2)/(vals.length-1)); const y=h-p-((v-min)/(max-min||1))*(h-p*2); return [x,y];});
-    const path=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
-    const area=path+` L ${pts[pts.length-1][0]} ${h-p} L ${pts[0][0]} ${h-p} Z`;
-    return `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Gráfico de acessos crescendo nos últimos 14 dias"><defs><linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#54d90d" stop-opacity=".24"/><stop offset="1" stop-color="#54d90d" stop-opacity="0"/></linearGradient></defs>${[.2,.4,.6,.8].map(n=>`<line class="chart-grid-line" x1="${p}" x2="${w-p}" y1="${h*n}" y2="${h*n}"/>`).join('')}<path class="chart-area" d="${area}"/><path class="chart-line" d="${path}"/>${pts.map(([x,y])=>`<circle class="chart-dot" cx="${x}" cy="${y}" r="4"/>`).join('')}</svg>`;
-  }
-
   function settingsPage() {
-    return `${pageHead('Sistema','Configurações','Preferências visuais e parâmetros que serão conectados ao backend.', '')}
+    return `${pageHead('Sistema','Configurações','Preferências visuais e parâmetros do TAJO TAP.', '')}
       <div class="detail-grid">
         <section class="card card-pad"><div class="card-title"><div><h2>Identidade</h2><p>A marca oficial já está aplicada em todo o sistema.</p></div></div><div class="row" style="padding:20px;background:#fff;border-radius:16px;border:1px solid #e5e8e4"><img src="assets/images/tajo-tap-logo.png" style="width:min(260px,80%)" alt="TAJO TAP"></div><div class="form-grid" style="margin-top:18px"><div class="field"><label>Domínio principal</label><input class="input" value="${esc(CONFIG.primaryDomain)}"></div><div class="field"><label>Motor das plaquinhas</label><input class="input" value="${esc(CONFIG.goDomain)}"></div></div></section>
-        <section class="card card-pad"><div class="card-title"><div><h2>Experiência</h2><p>Preferências locais do frontend.</p></div></div><div class="destination-option"><div class="destination-icon">${state.theme==='dark'?ICONS.moon:ICONS.sun}</div><div class="destination-copy" style="flex:1"><strong>Tema ${state.theme==='dark'?'escuro':'claro'}</strong><span>Você pode alternar a qualquer momento.</span></div><button class="btn btn-sm btn-ghost" data-action="theme">Alternar</button></div><div class="destination-option" style="margin-top:12px"><div class="destination-icon">${ICONS.lock}</div><div class="destination-copy"><strong>Backend ainda não conectado</strong><span>Supabase Auth, RLS, banco e redirect engine entram na próxima etapa.</span></div></div></section>
+        <section class="card card-pad"><div class="card-title"><div><h2>Experiência</h2><p>Preferências locais do frontend.</p></div></div><div class="destination-option"><div class="destination-icon">${state.theme==='dark'?ICONS.moon:ICONS.sun}</div><div class="destination-copy" style="flex:1"><strong>Tema ${state.theme==='dark'?'escuro':'claro'}</strong><span>Você pode alternar a qualquer momento.</span></div><button class="btn btn-sm btn-ghost" data-action="theme">Alternar</button></div><div class="destination-option" style="margin-top:12px"><div class="destination-icon">${ICONS.lock}</div><div class="destination-copy"><strong>Backend conectado</strong><span>Vercel Functions + Supabase Auth + PostgreSQL + motor de redirecionamento.</span></div></div></section>
       </div>`;
   }
 
   function notFoundPage() { return `${pageHead('Erro 404','Página não encontrada.','O endereço solicitado não existe neste frontend.', `<button class="btn btn-primary" data-route="dashboard">Voltar ao painel</button>`)}`; }
 
   function renderPortal() {
-    const owned = state.plaques.filter(p=>p.clientId==='c1');
+    const owned = state.plaques;
     app.innerHTML = `
       <div class="activate-shell" style="display:block;padding:0;background:var(--bg);color:var(--ink)">
         <header class="topbar" style="position:sticky"><a href="#/portal"><img src="assets/images/tajo-tap-logo.png" style="width:140px;background:#fff;border-radius:11px;padding:6px 8px" alt="TAJO TAP"></a><div style="margin-left:auto" class="row"><button class="btn btn-ghost" data-action="theme">${state.theme==='dark'?ICONS.sun:ICONS.moon}</button><button class="btn btn-dark" data-action="portal-exit">Sair</button></div></header>
@@ -352,8 +400,18 @@
   }
 
   function renderActivation(code) {
-    const p = state.plaques.find(x=>x.code===code) || state.plaques.find(x=>x.status==='unconfigured') || state.plaques[0];
-    state.activation.code = p.code;
+    const cleanCode = extractPlateCode(code);
+    state.activation.code = cleanCode;
+    if (!state.role) {
+      sessionStorage.setItem('tajoTapAfterLogin', `activate/${cleanCode}`);
+      app.innerHTML = `<main class="activate-shell"><section class="activate-card"><header class="activate-head"><img class="activate-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"><span class="badge badge-warning">ACESSO PROTEGIDO</span></header><div class="activate-body"><div class="eyebrow" style="color:var(--brand)">Plaquinha ${esc(cleanCode)}</div><h1>Entre para configurar.</h1><p>O destino de uma plaquinha só pode ser alterado por um administrador TAJO ou por um cliente previamente vinculado a ela.</p><button class="btn btn-primary" style="width:100%" data-action="activation-login">Entrar no painel ${ICONS.arrow}</button></div></section></main>`;
+      return;
+    }
+    const p = state.plaques.find(x=>x.code===cleanCode);
+    if (!p) {
+      app.innerHTML = `<main class="activate-shell"><section class="activate-card"><header class="activate-head"><img class="activate-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"><span class="badge badge-danger">INDISPONÍVEL</span></header><div class="activate-body"><div class="eyebrow" style="color:var(--brand)">${esc(cleanCode)}</div><h1>Sem permissão para configurar.</h1><p>Esta plaquinha não está vinculada à sua conta ou não foi encontrada. Se necessário, fale com a administração TAJO.</p><button class="btn btn-ghost" style="width:100%" data-action="activation-home">Voltar</button></div></section></main>`;
+      return;
+    }
     const step=state.activation.step;
     app.innerHTML = `<main class="activate-shell"><section class="activate-card"><header class="activate-head"><img class="activate-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"><span class="badge badge-${p.status==='unconfigured'?'warning':'success'}">${p.status==='unconfigured'?'CONFIGURAÇÃO':'ATIVA'}</span></header><div class="activate-body"><div class="eyebrow" style="color:var(--brand)">Plaquinha ${esc(p.code)}</div>${activationStep(p,step)}</div></section></main>`;
   }
@@ -369,11 +427,35 @@
     return items.map(([id,name,desc])=>`<button class="choice ${state.activation.selected===id?'active':''}" data-action="activation-choice" data-choice="${id}">${destinationIcon(id)}<strong>${name}</strong><span>${desc}</span></button>`).join('');
   }
   function destinationField(type) {
-    if(type==='whatsapp') return `<div class="stack"><div class="field"><label>WhatsApp</label><input id="activation-value" class="input" inputmode="tel" placeholder="(27) 99999-9999"></div><div class="field"><label>Mensagem inicial <span class="text-muted">(opcional)</span></label><textarea class="textarea" placeholder="Olá! Vim pela plaquinha..."></textarea></div></div>`;
-    if(type==='google') return `<div class="field"><label>Link de avaliação do Google</label><input id="activation-value" class="input" type="url" placeholder="https://g.page/r/.../review"><span class="field-help">Na etapa de backend poderemos oferecer um assistente para montar o link correto.</span></div>`;
+    if(type==='whatsapp') return `<div class="stack"><div class="field"><label>WhatsApp</label><input id="activation-value" class="input" inputmode="tel" placeholder="(27) 99999-9999"></div><div class="field"><label>Mensagem inicial <span class="text-muted">(opcional)</span></label><textarea id="activation-message" class="textarea" placeholder="Olá! Vim pela plaquinha..."></textarea></div></div>`;
+    if(type==='google') return `<div class="field"><label>Link de avaliação do Google</label><input id="activation-value" class="input" type="url" placeholder="https://g.page/r/.../review"><span class="field-help">Cole o link HTTPS de avaliação do estabelecimento.</span></div>`;
     return `<div class="field"><label>${destinationName(type)}</label><input id="activation-value" class="input" type="url" placeholder="https://"><span class="field-help">Informe um endereço HTTPS válido.</span></div>`;
   }
   function destinationName(type) { return ({google:'Avaliações Google',whatsapp:'WhatsApp',instagram:'Instagram',smart:'Smart Page',map:'Localização',custom:'Link personalizado'}[type]||'Destino'); }
+
+  function userInitials() {
+    const name=String(state.user?.name||'TAJO').trim();
+    return name.split(/\s+/).slice(0,2).map(x=>x[0]||'').join('').toUpperCase() || 'TJ';
+  }
+
+  function normalizeActivationDestination() {
+    const raw=String($('#activation-value')?.value||'').trim();
+    if(state.activation.selected==='whatsapp') {
+      const digits=raw.replace(/\D/g,'');
+      if(digits.length < 10) throw new Error('Informe um WhatsApp válido.');
+      const phone=digits.startsWith('55')?digits:`55${digits}`;
+      const message=String($('#activation-message')?.value||'').trim();
+      return `https://wa.me/${phone}${message?`?text=${encodeURIComponent(message)}`:''}`;
+    }
+    try { const u=new URL(raw); if(u.protocol!=='https:') throw new Error(); return u.toString(); }
+    catch { throw new Error('Informe um endereço HTTPS válido.'); }
+  }
+
+  function showCreatedPlate(plate, activationCode) {
+    const url=`https://${CONFIG.goDomain}${CONFIG.platePath}${plate.code}`;
+    showModal(`<div class="modal-head"><div><div class="eyebrow">Plaquinha criada</div><h2>${esc(plate.code)}</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body stack"><div class="destination-option active"><div class="destination-icon">${ICONS.check}</div><div class="destination-copy"><strong>Registro salvo no Supabase</strong><span>Agora este código pode ser aberto em qualquer aparelho.</span></div></div><div class="form-grid"><div class="field"><label>Link físico</label><input class="input mono" readonly value="${esc(url)}"></div><div class="field"><label>Código de ativação</label><input class="input mono" readonly value="${esc(activationCode||'—')}"><span class="field-help">Guarde este código. Por segurança, ele é exibido somente na criação.</span></div></div><div class="qr-frame" style="width:220px;margin:auto"><canvas class="qr-canvas" data-qr="${esc(url)}" width="440" height="440"></canvas></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="copy" data-copy="${esc(url)}">${ICONS.copy} Copiar link</button><button class="btn btn-primary" data-action="close-modal">Concluir</button></div>`);
+    renderQRCodes();
+  }
 
   function newPlaqueModal() {
     const generated = generateCode();
@@ -387,7 +469,7 @@
   function editDestinationModal(code) {
     const p=state.plaques.find(x=>x.code===code); if(!p) return;
     const current=p.destinationType||'google';
-    showModal(`<div class="modal-head"><div><div class="eyebrow">${esc(code)}</div><h2>Alterar destino</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="destination-form" data-code="${esc(code)}"><div class="modal-body"><p class="text-muted" style="margin-top:0">O QR Code e o NFC da plaquinha permanecem os mesmos.</p><div class="choice-grid" id="destination-choice-grid">${[['google','Avaliações Google'],['whatsapp','WhatsApp'],['instagram','Instagram'],['smart','Smart Page'],['map','Localização'],['custom','Outro link']].map(([id,n])=>`<button type="button" class="choice destination-modal-choice ${current===id?'active':''}" data-type="${id}">${destinationIcon(id)}<strong>${n}</strong><span>${id==='smart'?'Página inteligente TAJO':'Redirecionamento dinâmico'}</span></button>`).join('')}</div><input type="hidden" name="type" value="${current}"><div class="field"><label>Destino / configuração</label><input class="input" name="destination" value="${esc(p.destination)}" placeholder="https://..." required><span class="field-help">Frontend demonstrativo: a validação específica por tipo será implementada junto do backend.</span></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar alteração</button></div></form>`);
+    showModal(`<div class="modal-head"><div><div class="eyebrow">${esc(code)}</div><h2>Alterar destino</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="destination-form" data-code="${esc(code)}"><div class="modal-body"><p class="text-muted" style="margin-top:0">O QR Code e o NFC da plaquinha permanecem os mesmos.</p><div class="choice-grid" id="destination-choice-grid">${[['google','Avaliações Google'],['whatsapp','WhatsApp'],['instagram','Instagram'],['smart','Smart Page'],['map','Localização'],['custom','Outro link']].map(([id,n])=>`<button type="button" class="choice destination-modal-choice ${current===id?'active':''}" data-type="${id}">${destinationIcon(id)}<strong>${n}</strong><span>${id==='smart'?'Página inteligente TAJO':'Redirecionamento dinâmico'}</span></button>`).join('')}</div><input type="hidden" name="type" value="${current}"><div class="field"><label>Destino / configuração</label><input class="input" name="destination" value="${esc(p.destination)}" placeholder="https://..." required><span class="field-help">O backend valida o endereço antes de salvar. Use sempre um link HTTPS válido.</span></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar alteração</button></div></form>`);
   }
 
   function newClientModal() {
@@ -465,11 +547,15 @@
     const urlMatch=String(value||'').match(/\/t\/([A-Za-z0-9-]+)/i); return urlMatch ? urlMatch[1].toUpperCase() : clean;
   }
 
-  function handleScannedValue(value) {
-    const code=extractPlateCode(value); const p=state.plaques.find(x=>x.code===code);
+  async function handleScannedValue(value) {
+    const code=extractPlateCode(value); let p=state.plaques.find(x=>x.code===code);
     stopScanner(); closeModal();
-    if(p){ toast('Plaquinha encontrada',code); go('plaque/'+code); }
-    else { toast('Código lido',code+' ainda não está cadastrado nesta demonstração.'); }
+    if(!p && state.role==='admin') {
+      try { const out=await apiFetch(`/api/admin/plate?code=${encodeURIComponent(code)}`); p=out.plate; if(p) state.plaques.unshift(p); }
+      catch(err) { if(err.status!==404) toast('Falha na consulta',err.message); }
+    }
+    if(p){ toast('Plaquinha encontrada',code); go(state.role==='admin'?'plaque/'+code:'portal'); }
+    else { toast('Plaquinha não encontrada',code || 'Código inválido'); }
   }
 
   function bindPageEnhancements(r) {
@@ -522,14 +608,12 @@
     catch { const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('Copiado'); }
   }
 
-  document.addEventListener('click', (e) => {
+  document.addEventListener('click', async (e) => {
     const routeEl=e.target.closest('[data-route]');
     if(routeEl){ e.preventDefault(); go(routeEl.dataset.route); return; }
     const actionEl=e.target.closest('[data-action]'); if(!actionEl) return;
     const action=actionEl.dataset.action;
-    if(action==='demo-admin'){state.role='admin';saveState();go('dashboard');}
-    if(action==='demo-client'){state.role='client';saveState();go('portal');}
-    if(action==='logout'||action==='portal-exit'){state.role=null;saveState();go('login');}
+    if(action==='logout'||action==='portal-exit'){ try{await apiFetch('/api/auth/logout',{method:'POST'});}catch{} state.role=null;state.user=null;state.plaques=[];state.clients=[];go('login'); }
     if(action==='toggle-sidebar'){state.sidebarOpen=!state.sidebarOpen;render();}
     if(action==='close-sidebar'){state.sidebarOpen=false;render();}
     if(action==='theme'){setTheme(state.theme==='dark'?'light':'dark');render();}
@@ -537,37 +621,47 @@
     if(action==='new-plaque') newPlaqueModal();
     if(action==='new-client') newClientModal();
     if(action==='open-scanner') openScannerModal();
-    if(action==='simulate-scan') handleScannedValue(`https://${CONFIG.goDomain}${CONFIG.platePath}TT-7K2P9A`);
     if(action==='close-modal') closeModal();
     if(action==='modal-backdrop' && e.target===actionEl) closeModal();
     if(action==='scanner-manual-go') handleScannedValue($('#scanner-manual')?.value||'');
     if(action==='copy') copyText(actionEl.dataset.copy||'');
     if(action==='download-qr') downloadQR(actionEl.dataset.code);
     if(action==='edit-destination') editDestinationModal(actionEl.dataset.code);
-    if(action==='toggle-plate') { const p=state.plaques.find(x=>x.code===actionEl.dataset.code); if(p){p.status=p.status==='paused'?'active':'paused';saveState();toast('Status atualizado');render();} }
+    if(action==='toggle-plate') { const p=state.plaques.find(x=>x.code===actionEl.dataset.code); if(p&&state.role==='admin'){ try{ const target=p.status==='paused'?'active':'paused'; const out=await apiFetch(`/api/admin/plate?code=${encodeURIComponent(p.code)}`,{method:'PATCH',body:{status:target}}); Object.assign(p,out.plate); toast('Status atualizado'); render(); }catch(err){ toast('Não foi possível atualizar',err.message); } } }
     if(action==='go-plaques') go('plaques');
     if(action==='go-analytics') go('analytics');
+    if(action==='activation-login'){go('login');}
+    if(action==='activation-home'){go(state.role==='admin'?'dashboard':'portal');}
     if(action==='activation-choice'){state.activation.selected=actionEl.dataset.choice;render();}
-    if(action==='activation-next'){state.activation.step=Math.min(3,state.activation.step+1);render();}
+    if(action==='activation-next'){ if(state.activation.step===2){ try{state.activation.value=normalizeActivationDestination();}catch(err){toast('Revise o destino',err.message);return;} } state.activation.step=Math.min(3,state.activation.step+1);render();}
     if(action==='activation-back'){state.activation.step=Math.max(1,state.activation.step-1);render();}
     if(action==='activation-complete'){
-      const p=state.plaques.find(x=>x.code===state.activation.code); if(p){p.status='active';p.destinationType=state.activation.selected;p.destinationLabel=destinationName(state.activation.selected);p.destination='https://destino-configurado.exemplo';saveState();}
-      state.activation.step=1; toast('Plaquinha ativada','Agora o destino pode ser alterado pelo painel.'); state.role='client'; saveState(); go('portal');
+      const p=state.plaques.find(x=>x.code===state.activation.code); if(!p) return;
+      try {
+        const endpoint=state.role==='admin'?'/api/admin/destination':'/api/client/destination';
+        const out=await apiFetch(endpoint,{method:'POST',body:{code:p.code,type:state.activation.selected,url:state.activation.value}});
+        Object.assign(p,out.plate); state.activation.step=1;state.activation.value=''; toast('Plaquinha ativada','O destino foi salvo no backend.'); go(state.role==='admin'?`plaque/${p.code}`:'portal');
+      } catch(err) { toast('Não foi possível ativar',err.message); }
     }
   });
 
-  document.addEventListener('submit', (e) => {
-    if(e.target.id==='login-form') { e.preventDefault(); if(!e.target.reportValidity()) return; state.role='admin'; saveState(); go('dashboard'); }
+  document.addEventListener('submit', async (e) => {
+    if(e.target.id==='login-form') { e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target); try{ const out=await apiFetch('/api/auth/login',{method:'POST',body:{email:fd.get('email'),password:fd.get('password')}}); state.role=out.role;state.user=out.user||null;await refreshRoleData(); const after=sessionStorage.getItem('tajoTapAfterLogin');sessionStorage.removeItem('tajoTapAfterLogin'); if(after) go(after); else go(state.role==='admin'?'dashboard':'portal'); }catch(err){toast('Não foi possível entrar',err.message);} }
     if(e.target.id==='manual-scan-form'){e.preventDefault();handleScannedValue(new FormData(e.target).get('code'));}
     if(e.target.id==='new-plaque-form'){
-      e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target); const client=state.clients.find(c=>c.id===fd.get('client'));
-      state.plaques.unshift({id:'p'+Date.now(),code:fd.get('code'),name:fd.get('name'),client:client?.name||'Não vinculado',clientId:client?.id||null,status:'unconfigured',destinationType:null,destinationLabel:'Aguardando configuração',destination:'',scansToday:0,scansMonth:0,scansTotal:0,qr:0,nfc:0}); saveState(); closeModal(); toast('Plaquinha criada',fd.get('code')); go('plaques');
+      e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target);
+      try { const out=await apiFetch('/api/admin/plates',{method:'POST',body:{name:fd.get('name'),clientId:fd.get('client')||null,code:fd.get('code')}}); state.plaques.unshift(out.plate); showCreatedPlate(out.plate,out.activationCode); toast('Plaquinha criada',out.plate.code); }
+      catch(err){ toast('Não foi possível criar',err.message); }
     }
     if(e.target.id==='new-client-form'){
-      e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target); state.clients.push({id:'c'+Date.now(),name:fd.get('name'),contact:fd.get('contact'),phone:fd.get('phone'),city:fd.get('city'),plates:0,scans:0,status:'active'}); closeModal(); toast('Cliente cadastrado',fd.get('name')); render();
+      e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target);
+      try { const out=await apiFetch('/api/admin/clients',{method:'POST',body:{name:fd.get('name'),contact:fd.get('contact'),phone:fd.get('phone'),city:fd.get('city')}}); state.clients.unshift(out.client); closeModal(); toast('Cliente cadastrado',out.client.name); render(); }
+      catch(err){ toast('Não foi possível cadastrar',err.message); }
     }
     if(e.target.id==='destination-form'){
-      e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target), p=state.plaques.find(x=>x.code===e.target.dataset.code); if(p){p.destinationType=fd.get('type');p.destinationLabel=destinationName(fd.get('type'));p.destination=fd.get('destination');p.status='active';saveState();} closeModal();toast('Destino atualizado','A plaquinha física continua a mesma.');render();
+      e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target), p=state.plaques.find(x=>x.code===e.target.dataset.code); if(!p) return;
+      try { const endpoint=state.role==='admin'?'/api/admin/destination':'/api/client/destination'; const out=await apiFetch(endpoint,{method:'POST',body:{code:p.code,type:fd.get('type'),url:fd.get('destination')}}); Object.assign(p,out.plate); closeModal();toast('Destino atualizado','A plaquinha física continua a mesma.');render(); }
+      catch(err){toast('Não foi possível alterar',err.message);}
     }
   });
 
@@ -582,5 +676,5 @@
 
   window.addEventListener('hashchange',render);
   window.addEventListener('beforeunload',stopScanner);
-  render();
+  bootstrap();
 })();
