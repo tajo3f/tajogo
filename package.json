@@ -1,7 +1,7 @@
 {
   "name": "tajo-tap-backend",
   "private": true,
-  "version": "4.3.0",
+  "version": "4.4.0",
   "type": "module",
   "engines": {
     "node": "24.x"
@@ -10,11 +10,12 @@
     "check:js": "node tests/check_js.mjs",
     "check:static": "python tests/static_check.py",
     "check:qr": "node tests/qr_check.cjs",
-    "test": "npm run check:js && npm run check:static && npm run check:qr && npm run check:security && npm run check:vercel && npm run check:v4.1 && npm run check:v4.2 && npm run check:v4.3",
+    "test": "npm run check:js && npm run check:static && npm run check:qr && npm run check:security && npm run check:vercel && npm run check:v4.1 && npm run check:v4.2 && npm run check:v4.3 && npm run check:v4.4",
     "check:security": "python tests/security_check.py",
     "check:vercel": "python tests/vercel_function_count.py",
     "check:v4.1": "node tests/v4_1_check.mjs",
     "check:v4.2": "node tests/v4_2_check.mjs",
-    "check:v4.3": "node tests/v4_3_check.mjs"
+    "check:v4.3": "node tests/v4_3_check.mjs",
+    "check:v4.4": "node tests/v4_4_check.mjs"
   }
 }

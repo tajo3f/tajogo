@@ -1,6 +1,7 @@
+import crypto from 'node:crypto';
 import { allowMethods, apiError, readJson, safePlateCode, setNoStore, text } from '../_http.js';
 import { currentUser, setSessionCookies } from '../_auth.js';
-import { publicErrorCode, supabaseAuth, supabaseAuthAdmin, supabaseRest, supabaseRpc } from '../_supabase.js';
+import { publicErrorCode, supabaseAuth, supabaseAuthAdmin, supabaseRest } from '../_supabase.js';
 
 const TYPES = new Set(['google', 'whatsapp', 'instagram', 'smart', 'map', 'custom']);
 const LABELS = {
@@ -22,6 +23,10 @@ function validHttps(raw) {
   }
 }
 
+function hashPin(pin) {
+  return crypto.createHash('sha256').update(String(pin || ''), 'utf8').digest('hex');
+}
+
 function activationError(res, code, retryAfter = null) {
   const map = {
     PLATE_NOT_FOUND: [404, 'Plaquinha não encontrada.'],
@@ -35,7 +40,8 @@ function activationError(res, code, retryAfter = null) {
     USER_NOT_FOUND: [401, 'Não foi possível validar a conta responsável.'],
     COMPANY_REQUIRED: [400, 'Informe o nome do estabelecimento.'],
     TYPE_INVALID: [400, 'Selecione um tipo de destino válido.'],
-    URL_INVALID: [400, 'Informe um link HTTPS válido.']
+    URL_INVALID: [400, 'Informe um link HTTPS válido.'],
+    ACTIVATION_CONFLICT: [409, 'Esta plaquinha acabou de ser ativada em outra sessão. Atualize a página.']
   };
   const [status, message] = map[code] || [409, 'Não foi possível concluir a ativação.'];
   setNoStore(res);
@@ -44,13 +50,170 @@ function activationError(res, code, retryAfter = null) {
 
 async function getPlate(code) {
   const rows = await supabaseRest(
-    `tap_plates?code=eq.${encodeURIComponent(code)}&select=code,name,status,client_id,owner_user_id,current_destination_id,setup_status,configuration_locked,configured_at&limit=1`
+    `tap_plates?code=eq.${encodeURIComponent(code)}&select=id,code,name,status,client_id,owner_user_id,current_destination_id,setup_status,configuration_locked,configured_at,activated_at&limit=1`
   );
   return rows?.[0] || null;
 }
 
+async function getActivation(plateId) {
+  const rows = await supabaseRest(
+    `tap_plate_activation_codes?plate_id=eq.${encodeURIComponent(plateId)}&select=plate_id,code_hash,consumed_at,expires_at,failed_attempts,last_failed_at,locked_until&limit=1`
+  );
+  return rows?.[0] || null;
+}
+
+async function updateActivation(plateId, patch) {
+  return supabaseRest(`tap_plate_activation_codes?plate_id=eq.${encodeURIComponent(plateId)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify(patch)
+  });
+}
+
+async function validatePin(plate, pin) {
+  if (plate.configuration_locked || plate.setup_status === 'completed' || plate.owner_user_id || plate.status === 'active') {
+    return { ok: false, code: 'ALREADY_CONFIGURED' };
+  }
+  if (!['inventory', 'unconfigured'].includes(plate.status)) {
+    return { ok: false, code: 'PLATE_UNAVAILABLE' };
+  }
+
+  const activation = await getActivation(plate.id);
+  if (!activation) return { ok: false, code: 'PIN_NOT_AVAILABLE' };
+  if (activation.consumed_at) return { ok: false, code: 'PIN_USED' };
+
+  const now = Date.now();
+  if (activation.expires_at && new Date(activation.expires_at).getTime() <= now) {
+    return { ok: false, code: 'PIN_EXPIRED' };
+  }
+  if (activation.locked_until && new Date(activation.locked_until).getTime() > now) {
+    return { ok: false, code: 'PIN_LOCKED', retryAfter: activation.locked_until };
+  }
+
+  const valid = /^\d{6}$/.test(pin) && hashPin(pin) === activation.code_hash;
+  if (!valid) {
+    const attempts = Math.min(Number(activation.failed_attempts || 0) + 1, 50);
+    const lockUntil = attempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null;
+    await updateActivation(plate.id, {
+      failed_attempts: attempts,
+      last_failed_at: new Date().toISOString(),
+      locked_until: lockUntil
+    });
+    return { ok: false, code: lockUntil ? 'PIN_LOCKED' : 'PIN_INVALID', retryAfter: lockUntil };
+  }
+
+  if (Number(activation.failed_attempts || 0) > 0 || activation.last_failed_at || activation.locked_until) {
+    await updateActivation(plate.id, { failed_attempts: 0, last_failed_at: null, locked_until: null });
+  }
+  return { ok: true, activation };
+}
+
 function activationReference() {
   return `ATV-${Date.now().toString(36).slice(-6).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+}
+
+async function createClient({ companyName, contactName, phone, email, userId }) {
+  const rows = await supabaseRest('tap_clients?select=id,name,contact_name,phone,email', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      name: companyName.slice(0, 120),
+      contact_name: contactName || null,
+      phone: phone || null,
+      email: email || null,
+      status: 'active',
+      created_by: userId
+    })
+  });
+  return rows?.[0] || null;
+}
+
+async function enrichExistingClient(clientId, { contactName, phone, email }) {
+  const rows = await supabaseRest(`tap_clients?id=eq.${encodeURIComponent(clientId)}&select=id,contact_name,phone,email&limit=1`);
+  const client = rows?.[0];
+  if (!client) return null;
+  const patch = {};
+  if (!client.contact_name && contactName) patch.contact_name = contactName;
+  if (!client.phone && phone) patch.phone = phone;
+  if (!client.email && email) patch.email = email;
+  if (Object.keys(patch).length) {
+    await supabaseRest(`tap_clients?id=eq.${encodeURIComponent(clientId)}`, {
+      method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(patch)
+    });
+  }
+  return client;
+}
+
+async function ensureMembership(clientId, userId) {
+  const found = await supabaseRest(
+    `tap_client_members?client_id=eq.${encodeURIComponent(clientId)}&user_id=eq.${encodeURIComponent(userId)}&select=client_id,user_id&limit=1`
+  );
+  if (found?.[0]) {
+    await supabaseRest(`tap_client_members?client_id=eq.${encodeURIComponent(clientId)}&user_id=eq.${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ role: 'owner', active: true })
+    });
+    return { created: false };
+  }
+  await supabaseRest('tap_client_members', {
+    method: 'POST',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ client_id: clientId, user_id: userId, role: 'owner', active: true })
+  });
+  return { created: true };
+}
+
+async function createDestination(plateId, type, url, label, userId) {
+  const rows = await supabaseRest('tap_plate_destinations?select=id,plate_id,type,url', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      plate_id: plateId,
+      type,
+      label: String(label || 'Destino').slice(0, 120),
+      url,
+      is_active: true,
+      created_by: userId
+    })
+  });
+  return rows?.[0] || null;
+}
+
+async function claimPlate(plateId, patch) {
+  const path = [
+    'tap_plates?',
+    `id=eq.${encodeURIComponent(plateId)}`,
+    '&configuration_locked=eq.false',
+    '&setup_status=eq.pending',
+    '&owner_user_id=is.null',
+    '&status=in.(inventory,unconfigured)',
+    '&select=id,code,client_id,owner_user_id,current_destination_id,status,setup_status,configuration_locked,configured_at'
+  ].join('');
+  const rows = await supabaseRest(path, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(patch)
+  });
+  return rows?.[0] || null;
+}
+
+async function cleanupFailedClaim({ destinationId, createdClientId, clientId, userId, membershipCreated }) {
+  if (destinationId) {
+    await supabaseRest(`tap_plate_destinations?id=eq.${encodeURIComponent(destinationId)}`, {
+      method: 'DELETE', headers: { Prefer: 'return=minimal' }
+    }).catch(() => null);
+  }
+  if (membershipCreated && clientId && userId) {
+    await supabaseRest(`tap_client_members?client_id=eq.${encodeURIComponent(clientId)}&user_id=eq.${encodeURIComponent(userId)}`, {
+      method: 'DELETE', headers: { Prefer: 'return=minimal' }
+    }).catch(() => null);
+  }
+  if (createdClientId) {
+    await supabaseRest(`tap_clients?id=eq.${encodeURIComponent(createdClientId)}`, {
+      method: 'DELETE', headers: { Prefer: 'return=minimal' }
+    }).catch(() => null);
+  }
 }
 
 export default async function handler(req, res) {
@@ -74,6 +237,7 @@ export default async function handler(req, res) {
       const available = !configured && ['inventory', 'unconfigured'].includes(plate.status);
       return res.status(200).json({
         ok: true,
+        activationEngine: 'REST_V4_4',
         plate: {
           code: plate.code,
           name: plate.name,
@@ -106,16 +270,12 @@ export default async function handler(req, res) {
     if (!url) return apiError(res, 400, 'URL_INVALID', 'Informe um link HTTPS válido.');
     if (companyName.length < 2) return apiError(res, 400, 'COMPANY_REQUIRED', 'Informe o nome do estabelecimento.');
 
-    // V4.1 usa RPC com nome novo para evitar colisão de retorno com versões antigas.
-    stage = 'pin_validation_v4';
-    const pinRows = await supabaseRpc('tap_validate_activation_pin_v4', {
-      p_plate_code: code,
-      p_pin: pin
-    });
-    const pinResult = pinRows?.[0] || {};
-    if (pinResult.result_code !== 'PIN_OK') {
-      return activationError(res, pinResult.result_code || 'PIN_INVALID', pinResult.retry_after || null);
-    }
+    // V4.4: validação direta via REST server-side. Não depende do cache de RPC do PostgREST.
+    stage = 'pin_validation_rest';
+    let plate = await getPlate(code);
+    if (!plate) return activationError(res, 'PLATE_NOT_FOUND');
+    const pinCheck = await validatePin(plate, pin);
+    if (!pinCheck.ok) return activationError(res, pinCheck.code, pinCheck.retryAfter || null);
 
     let user = null;
     let sessionReady = false;
@@ -123,9 +283,7 @@ export default async function handler(req, res) {
     stage = 'account';
     if (mode === 'existing') {
       user = await currentUser(req, res);
-      if (!user?.id) {
-        return apiError(res, 401, 'AUTH_REQUIRED', 'Entre com sua conta antes de concluir a ativação.');
-      }
+      if (!user?.id) return apiError(res, 401, 'AUTH_REQUIRED', 'Entre com sua conta antes de concluir a ativação.');
     } else {
       if (fullName.length < 2) return apiError(res, 400, 'NAME_REQUIRED', 'Informe seu nome.');
       if (!email || !/^\S+@\S+\.\S+$/.test(email)) return apiError(res, 400, 'EMAIL_INVALID', 'Informe um e-mail válido.');
@@ -135,11 +293,7 @@ export default async function handler(req, res) {
       try {
         signup = await supabaseAuth('signup', {
           method: 'POST',
-          body: JSON.stringify({
-            email,
-            password,
-            data: { full_name: fullName, phone }
-          })
+          body: JSON.stringify({ email, password, data: { full_name: fullName, phone } })
         });
       } catch (error) {
         if (error?.status === 400 || error?.status === 422) {
@@ -162,91 +316,130 @@ export default async function handler(req, res) {
       }
     }
 
-    stage = 'activate_v4';
-    const accountEmail = user.email || email;
-    const accountName = fullName || user.user_metadata?.full_name || accountEmail?.split('@')[0] || 'Cliente';
-    const claimRows = await supabaseRpc('tap_activate_plate_v4', {
-      p_plate_code: code,
-      p_pin: pin,
-      p_user: user.id,
-      p_company_name: companyName,
-      p_contact_name: accountName,
-      p_phone: phone || user.user_metadata?.phone || '',
-      p_email: accountEmail || '',
-      p_type: type,
-      p_url: url,
-      p_label: LABELS[type]
-    });
-
-    const claim = claimRows?.[0] || {};
-    if (claim.result_code !== 'OK') {
-      // Não mantém conta recém-criada sem plaquinha quando a ativação não conclui.
-      if (createdNewUser && createdUserId) {
-        await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
-      }
-      return activationError(res, claim.result_code || 'ACTIVATION_FAILED');
+    stage = 'activate_rest_v4_4';
+    // Releitura antes do claim reduz a janela de concorrência.
+    plate = await getPlate(code);
+    if (!plate) throw Object.assign(new Error('PLATE_NOT_FOUND'), { activationCode: 'PLATE_NOT_FOUND' });
+    if (plate.configuration_locked || plate.setup_status === 'completed' || plate.owner_user_id || plate.status === 'active') {
+      if (createdNewUser && createdUserId) await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
+      return activationError(res, 'ALREADY_CONFIGURED');
     }
 
-    if (mode === 'existing') sessionReady = true;
+    // Valida PIN novamente imediatamente antes do claim.
+    const finalPinCheck = await validatePin(plate, pin);
+    if (!finalPinCheck.ok) {
+      if (createdNewUser && createdUserId) await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
+      return activationError(res, finalPinCheck.code, finalPinCheck.retryAfter || null);
+    }
 
-    stage = 'done';
-    return res.status(200).json({
-      ok: true,
-      activated: true,
-      code,
-      sessionReady,
-      emailConfirmationRequired: mode === 'signup' && !sessionReady,
-      plateId: claim.plate_id || null,
-      clientId: claim.client_id || null,
-      configuredAt: claim.configured_at || null
-    });
+    const accountEmail = String(user.email || email || '').toLowerCase();
+    const accountName = text(fullName || user.user_metadata?.full_name || accountEmail?.split('@')[0] || 'Cliente', 120);
+    const accountPhone = text(phone || user.user_metadata?.phone || '', 40);
+    const nowIso = new Date().toISOString();
+
+    let clientId = plate.client_id || null;
+    let createdClientId = null;
+    let membershipCreated = false;
+    let destinationId = null;
+    let claimSucceeded = false;
+
+    try {
+      if (!clientId) {
+        const client = await createClient({ companyName, contactName: accountName, phone: accountPhone, email: accountEmail, userId: user.id });
+        if (!client?.id) throw new Error('CLIENT_CREATE_FAILED');
+        clientId = client.id;
+        createdClientId = client.id;
+      } else {
+        const client = await enrichExistingClient(clientId, { contactName: accountName, phone: accountPhone, email: accountEmail });
+        if (!client) throw new Error('CLIENT_NOT_FOUND');
+      }
+
+      const member = await ensureMembership(clientId, user.id);
+      membershipCreated = Boolean(member.created);
+
+      const destination = await createDestination(plate.id, type, url, LABELS[type], user.id);
+      if (!destination?.id) throw new Error('DESTINATION_CREATE_FAILED');
+      destinationId = destination.id;
+
+      const claimed = await claimPlate(plate.id, {
+        client_id: clientId,
+        owner_user_id: user.id,
+        setup_status: 'completed',
+        configuration_locked: true,
+        configured_at: nowIso,
+        configured_by: user.id,
+        claimed_at: nowIso,
+        current_destination_id: destinationId,
+        status: 'active',
+        activated_at: plate.activated_at || nowIso,
+        updated_at: nowIso
+      });
+
+      if (!claimed?.id) {
+        await cleanupFailedClaim({ destinationId, createdClientId, clientId, userId: user.id, membershipCreated });
+        if (createdNewUser && createdUserId) await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
+        return activationError(res, 'ACTIVATION_CONFLICT');
+      }
+      claimSucceeded = true;
+
+      // Depois do claim, deixa somente o destino atual como ativo e consome o PIN.
+      await supabaseRest(`tap_plate_destinations?plate_id=eq.${encodeURIComponent(plate.id)}&id=neq.${encodeURIComponent(destinationId)}&is_active=eq.true`, {
+        method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ is_active: false })
+      }).catch(() => null);
+
+      await updateActivation(plate.id, {
+        consumed_at: nowIso,
+        failed_attempts: 0,
+        last_failed_at: null,
+        locked_until: null
+      }).catch((postClaimError) => {
+        console.error('[public/activate:v4.4:pin-consume]', { plateId: plate.id, detail: postClaimError?.detail || postClaimError?.message });
+      });
+
+      await supabaseRest('tap_audit_logs', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          actor_user_id: user.id,
+          action: 'plate.self_activation.complete.v4_4',
+          entity_type: 'plate',
+          entity_id: plate.id,
+          metadata: { client_id: clientId, destination_id: destinationId, type, source: 'atv', engine: 'rest_v4_4' }
+        })
+      }).catch(() => null);
+
+      if (mode === 'existing') sessionReady = true;
+      stage = 'done';
+      return res.status(200).json({
+        ok: true,
+        activated: true,
+        activationEngine: 'REST_V4_4',
+        code,
+        sessionReady,
+        emailConfirmationRequired: mode === 'signup' && !sessionReady,
+        plateId: plate.id,
+        clientId,
+        configuredAt: nowIso
+      });
+    } catch (innerError) {
+      if (!claimSucceeded) {
+        await cleanupFailedClaim({ destinationId, createdClientId, clientId, userId: user.id, membershipCreated });
+      }
+      throw innerError;
+    }
   } catch (error) {
     const code = publicErrorCode(error);
     const reference = activationReference();
-    console.error('[public/activate]', {
-      reference,
-      stage,
-      code,
-      status: error?.status,
-      detail: error?.detail
-    });
+    console.error('[public/activate:v4.4]', { reference, stage, code, status: error?.status, detail: error?.detail || error?.message });
 
-    if (createdNewUser && createdUserId && stage === 'activate_v4') {
+    if (createdNewUser && createdUserId && stage === 'activate_rest_v4_4') {
       await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
-    }
-
-    const dbCode = String(error?.payload?.code || '');
-    const dbMessage = String(error?.payload?.message || '');
-    const rpcStage = ['pin_validation_v4', 'activate_v4'].includes(stage);
-    const rpcMissing = rpcStage && (
-      error?.status === 404 ||
-      dbCode === 'PGRST202' ||
-      dbCode === '42883' ||
-      /Could not find the function/i.test(dbMessage)
-    );
-
-    if (rpcMissing) {
-      return res.status(503).json({
-        ok: false,
-        error: 'ACTIVATION_RPC_NOT_AVAILABLE',
-        message: 'O Data API do Supabase ainda não encontrou o módulo de ativação. Execute a migration 006_activation_v4_3_hotfix.sql e aguarde o recarregamento do schema.',
-        reference
-      });
-    }
-
-    if (rpcStage && error?.status === 400) {
-      return res.status(503).json({
-        ok: false,
-        error: 'ACTIVATION_DATABASE_ERROR',
-        message: 'O banco encontrou uma inconsistência ao concluir a ativação. A V4.3 corrige o fluxo SQL; execute a migration 006_activation_v4_3_hotfix.sql e tente novamente.',
-        reference
-      });
     }
 
     return res.status(503).json({
       ok: false,
       error: code,
-      message: 'Não foi possível concluir a ativação. A tentativa não foi confirmada. Tente novamente; se persistir, informe a referência ao suporte TAJO.',
+      message: 'Não foi possível concluir a ativação. Nenhuma nova ativação foi confirmada. Tente novamente e, se persistir, informe a referência ao suporte TAJO.',
       reference
     });
   }
