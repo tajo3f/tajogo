@@ -45,6 +45,11 @@ async function listBatches() {
   if (!batches?.length) return [];
   const ids = batches.map((b) => b.id).join(',');
   const plates = await supabaseRest(`tap_plates?batch_id=in.(${ids})&select=id,code,name,status,setup_status,configuration_locked,batch_id,batch_position,created_at&order=batch_position.asc`);
+  const plateIds = (plates || []).map((plate) => plate.id).filter(Boolean);
+  const activationRows = plateIds.length
+    ? await supabaseRest(`tap_plate_activation_codes?plate_id=in.(${plateIds.join(',')})&select=plate_id,admin_pin,consumed_at`).catch(() => [])
+    : [];
+  const activationByPlate = new Map((activationRows || []).map((row) => [row.plate_id, row]));
   const byBatch = new Map();
   for (const plate of plates || []) {
     if (!byBatch.has(plate.batch_id)) byBatch.set(plate.batch_id, []);
@@ -56,7 +61,9 @@ async function listBatches() {
       setupStatus: plate.setup_status,
       configurationLocked: Boolean(plate.configuration_locked),
       position: plate.batch_position,
-      createdAt: plate.created_at
+      createdAt: plate.created_at,
+      activationCode: activationByPlate.get(plate.id)?.admin_pin || null,
+      pinConsumedAt: activationByPlate.get(plate.id)?.consumed_at || null
     });
   }
   return batches.map((batch) => ({
@@ -124,6 +131,7 @@ export default async function handler(req, res) {
       const activationRows = plateCodes.map((plateCode, index) => ({
         plate_id: byCode.get(plateCode)?.id,
         code_hash: hashPin(pins[index]),
+        admin_pin: pins[index],
         created_by: auth.user.id
       }));
       if (activationRows.some((row) => !row.plate_id)) throw Object.assign(new Error('BATCH_PLATE_MISMATCH'), { code: 'BATCH_PLATE_MISMATCH' });
@@ -171,7 +179,7 @@ export default async function handler(req, res) {
         createdAt: batch.created_at,
         items
       },
-      warning: 'Os PINs são exibidos somente nesta criação. Salve o mapa interno de ativação antes de fechar.'
+      warning: 'Os PINs ficam disponíveis somente para administradores no painel de plaquinhas e no mapa interno do lote.'
     });
   } catch (error) {
     const code = publicErrorCode(error);

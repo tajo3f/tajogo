@@ -16,6 +16,7 @@ import sellerHub from '../server/seller/hub.js';
 import sellerChat from '../server/seller/chat.js';
 import adminSellers from '../server/admin/sellers.js';
 import adminBatches from '../server/admin/batches.js';
+import adminPlateBulk from '../server/admin/plate-bulk.js';
 
 const ROUTES = new Map([
   ['auth/login', authLogin],
@@ -35,7 +36,8 @@ const ROUTES = new Map([
   ['seller/hub', sellerHub],
   ['seller/chat', sellerChat],
   ['admin/sellers', adminSellers],
-  ['admin/batches', adminBatches]
+  ['admin/batches', adminBatches],
+  ['admin/plates/bulk-delete', adminPlateBulk]
 ]);
 
 function routeName(value) {

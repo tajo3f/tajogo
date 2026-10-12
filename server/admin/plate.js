@@ -1,9 +1,24 @@
+import crypto from 'node:crypto';
 import { allowMethods, apiError, isUuid, readJson, safePlateCode, setNoStore, text } from '../_http.js';
 import { requireAdmin } from '../_auth.js';
 import { mapPlate } from '../_models.js';
 import { publicErrorCode, supabaseRest } from '../_supabase.js';
 
 const STATUSES = new Set(['unconfigured', 'active', 'paused', 'archived']);
+function activationPin() { return String(crypto.randomInt(100000, 1000000)); }
+function hashPin(pin) { return crypto.createHash('sha256').update(pin, 'utf8').digest('hex'); }
+
+async function withActivationPin(plate) {
+  const activationRows = await supabaseRest(`tap_plate_activation_codes?plate_id=eq.${encodeURIComponent(plate.id)}&select=plate_id,admin_pin,consumed_at,locked_until,failed_attempts&limit=1`).catch(() => []);
+  const activation = activationRows?.[0];
+  return {
+    ...mapPlate(plate),
+    activationPin: activation?.admin_pin || null,
+    pinConsumedAt: activation?.consumed_at || null,
+    pinLockedUntil: activation?.locked_until || null,
+    pinFailedAttempts: Number(activation?.failed_attempts || 0)
+  };
+}
 
 export default async function handler(req, res) {
   setNoStore(res);
@@ -17,9 +32,46 @@ export default async function handler(req, res) {
     const rows = await supabaseRest(`tap_plate_admin_view?code=eq.${encodeURIComponent(code)}&select=*&limit=1`);
     const current = rows?.[0];
     if (!current) return apiError(res, 404, 'PLATE_NOT_FOUND', 'Plaquinha não encontrada.');
-    if (req.method === 'GET') return res.status(200).json({ ok: true, plate: mapPlate(current) });
+    if (req.method === 'GET') return res.status(200).json({ ok: true, plate: await withActivationPin(current) });
 
     const body = readJson(req);
+    if (req.method === 'PATCH' && body?.action === 'reset-pin') {
+      if (current.configuration_locked || current.setup_status === 'completed' || current.status === 'active') {
+        return apiError(res, 409, 'PLATE_ALREADY_CONFIGURED', 'O PIN não pode ser redefinido depois que a plaquinha foi ativada.');
+      }
+
+      const pin = activationPin();
+      const activationRows = await supabaseRest(`tap_plate_activation_codes?plate_id=eq.${encodeURIComponent(current.id)}&select=plate_id&limit=1`).catch(() => []);
+      if (activationRows?.[0]) {
+        await supabaseRest(`tap_plate_activation_codes?plate_id=eq.${encodeURIComponent(current.id)}`, {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            code_hash: hashPin(pin),
+            admin_pin: pin,
+            consumed_at: null,
+            failed_attempts: 0,
+            last_failed_at: null,
+            locked_until: null,
+            expires_at: null
+          })
+        });
+      } else {
+        await supabaseRest('tap_plate_activation_codes', {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ plate_id: current.id, code_hash: hashPin(pin), admin_pin: pin, created_by: auth.user.id })
+        });
+      }
+
+      await supabaseRest('tap_audit_logs', {
+        method: 'POST', headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ actor_user_id: auth.user.id, action: 'plate.pin.reset', entity_type: 'plate', entity_id: current.id, metadata: { code: current.code } })
+      }).catch(() => null);
+
+      const updatedRows = await supabaseRest(`tap_plate_admin_view?id=eq.${encodeURIComponent(current.id)}&select=*&limit=1`);
+      return res.status(200).json({ ok: true, plate: await withActivationPin(updatedRows?.[0] || current), activationCode: pin });
+    }
     if (req.method === 'DELETE') {
       const confirmCode = safePlateCode(body?.confirmCode);
       if (!confirmCode || confirmCode !== code) return apiError(res, 400, 'DELETE_CONFIRMATION_REQUIRED', 'Confirme o código exato da plaquinha para excluir.');
@@ -78,7 +130,7 @@ export default async function handler(req, res) {
     }).catch(() => null);
 
     const updated = await supabaseRest(`tap_plate_admin_view?id=eq.${encodeURIComponent(current.id)}&select=*&limit=1`);
-    return res.status(200).json({ ok: true, plate: mapPlate(updated?.[0]) });
+    return res.status(200).json({ ok: true, plate: await withActivationPin(updated?.[0]) });
   } catch (error) {
     console.error('[admin/plate]', { code: publicErrorCode(error), status: error?.status, detail: error?.detail });
     return apiError(res, 503, publicErrorCode(error), req.method === 'DELETE' ? 'Não foi possível excluir a plaquinha.' : 'Não foi possível atualizar a plaquinha.');

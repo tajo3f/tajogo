@@ -42,7 +42,24 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET') {
       const rows = await supabaseRest('tap_plate_admin_view?select=*&order=created_at.desc');
-      return res.status(200).json({ ok: true, plates: (rows || []).map(mapPlate) });
+      const ids = (rows || []).map((row) => row.id).filter(Boolean);
+      let activationByPlate = new Map();
+      if (ids.length) {
+        const activationRows = await supabaseRest(`tap_plate_activation_codes?plate_id=in.(${ids.join(',')})&select=plate_id,admin_pin,consumed_at,locked_until,failed_attempts`).catch(() => []);
+        activationByPlate = new Map((activationRows || []).map((row) => [row.plate_id, row]));
+      }
+      const plates = (rows || []).map((row) => {
+        const plate = mapPlate(row);
+        const activation = activationByPlate.get(row.id);
+        return {
+          ...plate,
+          activationPin: activation?.admin_pin || null,
+          pinConsumedAt: activation?.consumed_at || null,
+          pinLockedUntil: activation?.locked_until || null,
+          pinFailedAttempts: Number(activation?.failed_attempts || 0)
+        };
+      });
+      return res.status(200).json({ ok: true, plates });
     }
 
     const body = readJson(req);
@@ -69,7 +86,7 @@ export default async function handler(req, res) {
     try {
       await supabaseRest('tap_plate_activation_codes', {
         method: 'POST', headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({ plate_id: created.id, code_hash: hashPin(pin), created_by: auth.user.id })
+        body: JSON.stringify({ plate_id: created.id, code_hash: hashPin(pin), admin_pin: pin, created_by: auth.user.id })
       });
     } catch (error) {
       await supabaseRest(`tap_plates?id=eq.${encodeURIComponent(created.id)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }).catch(() => null);
@@ -82,7 +99,7 @@ export default async function handler(req, res) {
     }).catch(() => null);
 
     const rows = await supabaseRest(`tap_plate_admin_view?id=eq.${encodeURIComponent(created.id)}&select=*&limit=1`);
-    return res.status(201).json({ ok: true, plate: mapPlate(rows?.[0] || created), activationCode: pin });
+    return res.status(201).json({ ok: true, plate: { ...mapPlate(rows?.[0] || created), activationPin: pin, pinConsumedAt: null, pinLockedUntil: null, pinFailedAttempts: 0 }, activationCode: pin });
   } catch (error) {
     console.error('[admin/plates]', { code: publicErrorCode(error), status: error?.status, detail: error?.detail });
     return apiError(res, 503, publicErrorCode(error), 'Não foi possível concluir a operação de plaquinhas.');

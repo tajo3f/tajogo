@@ -65,6 +65,7 @@
     batches: [],
     productionError: '',
     lastBatch: null,
+    selectedPlateCodes: [],
     sellerData: { seller:null, metrics:{}, leads:[], sales:[], messages:[] },
     chatTimer: null,
     sidebarOpen: false,
@@ -110,6 +111,8 @@
     ]);
     state.plaques = Array.isArray(platesResult.plates) ? platesResult.plates : [];
     state.clients = Array.isArray(clientsResult.clients) ? clientsResult.clients : [];
+    const existingCodes = new Set(state.plaques.map((p) => p.code));
+    state.selectedPlateCodes = (state.selectedPlateCodes || []).filter((code) => existingCodes.has(code));
   }
 
   async function loadClientData() {
@@ -393,12 +396,19 @@
   function activity(title,text,icon,time) { return `<div class="activity"><div class="activity-icon">${ICONS[icon]}</div><div><strong>${title}</strong><span>${text}</span></div><time>${time}</time></div>`; }
 
   function plaquesPage() {
-    const rows = state.plaques.map(p => `<tr data-route="plaque/${esc(p.code)}"><td><div class="entity"><div class="entity-icon">${ICONS.plate}</div><div class="entity-copy"><strong>${esc(p.name)}</strong><span class="mono">${esc(p.code)}</span></div></div></td><td>${esc(p.client)}</td><td>${esc(p.destinationLabel)}</td><td>${formatNumber(p.scansMonth)}</td><td>${statusBadge(p.status)}</td><td><button class="btn btn-sm btn-ghost" data-route="plaque/${esc(p.code)}">Gerenciar ${ICONS.chevron}</button></td></tr>`).join('');
-    const cards = state.plaques.map(p => `<article class="card mobile-card"><div class="mobile-card-head"><div class="entity"><div class="entity-icon">${ICONS.plate}</div><div class="entity-copy"><strong>${esc(p.name)}</strong><span class="mono">${esc(p.code)}</span></div></div>${statusBadge(p.status)}</div><div class="mobile-card-meta"><div><span>Cliente</span><strong>${esc(p.client)}</strong></div><div><span>Acessos / mês</span><strong>${formatNumber(p.scansMonth)}</strong></div><div><span>Destino</span><strong>${esc(p.destinationLabel)}</strong></div><div><span>Total</span><strong>${formatNumber(p.scansTotal)}</strong></div></div><button class="btn btn-ghost" style="width:100%" data-route="plaque/${esc(p.code)}">Gerenciar plaquinha ${ICONS.arrow}</button></article>`).join('');
+    const selected = new Set(state.selectedPlateCodes || []);
+    const pinCell = (p) => {
+      if (p.activationPin) return `<div class="pin-inline"><strong class="mono">${esc(p.activationPin)}</strong><button class="icon-mini" type="button" data-action="copy" data-copy="${esc(p.activationPin)}" title="Copiar PIN">${ICONS.copy}</button>${p.pinConsumedAt||p.configurationLocked?'<span class="pin-status-mini">usado</span>':''}</div>`;
+      return `<button class="btn btn-xs btn-ghost" type="button" data-action="reset-pin" data-code="${esc(p.code)}">Gerar PIN</button>`;
+    };
+    const rows = state.plaques.map(p => `<tr data-code="${esc(p.code)}"><td class="select-cell"><label class="check-control" title="Selecionar ${esc(p.code)}"><input type="checkbox" data-plate-select="${esc(p.code)}" ${selected.has(p.code)?'checked':''}><span></span></label></td><td><div class="entity"><div class="entity-icon">${ICONS.plate}</div><div class="entity-copy"><strong>${esc(p.name)}</strong><span class="mono">${esc(p.code)}</span></div></div></td><td>${pinCell(p)}</td><td>${esc(p.client)}</td><td>${esc(p.destinationLabel)}</td><td>${formatNumber(p.scansMonth)}</td><td>${statusBadge(p.status)}</td><td><button class="btn btn-sm btn-ghost" data-route="plaque/${esc(p.code)}">Gerenciar ${ICONS.chevron}</button></td></tr>`).join('');
+    const cards = state.plaques.map(p => `<article class="card mobile-card" data-code="${esc(p.code)}"><div class="mobile-card-head"><div class="row" style="gap:10px"><label class="check-control"><input type="checkbox" data-plate-select="${esc(p.code)}" ${selected.has(p.code)?'checked':''}><span></span></label><div class="entity"><div class="entity-icon">${ICONS.plate}</div><div class="entity-copy"><strong>${esc(p.name)}</strong><span class="mono">${esc(p.code)}</span></div></div></div>${statusBadge(p.status)}</div><div class="mobile-card-meta"><div><span>PIN</span><strong>${p.activationPin?`<span class="mono">${esc(p.activationPin)}</span>${p.pinConsumedAt||p.configurationLocked?' <small class="pin-status-mini">usado</small>':''}`:'Não disponível'}</strong></div><div><span>Cliente</span><strong>${esc(p.client)}</strong></div><div><span>Acessos / mês</span><strong>${formatNumber(p.scansMonth)}</strong></div><div><span>Destino</span><strong>${esc(p.destinationLabel)}</strong></div></div><div class="row wrap">${!p.activationPin && !p.configurationLocked && p.setupStatus!=='completed'?`<button class="btn btn-ghost" data-action="reset-pin" data-code="${esc(p.code)}">Gerar PIN</button>`:''}<button class="btn btn-ghost grow" data-route="plaque/${esc(p.code)}">Gerenciar plaquinha ${ICONS.arrow}</button></div></article>`).join('');
+    const selectionCount = selected.size;
     return `
       ${pageHead('Operação','Plaquinhas','Crie, filtre e gerencie todos os pontos QR/NFC da TAJO TAP.', `<button class="btn btn-ghost" data-action="new-batch">${ICONS.printer} Criar lote</button><button class="btn btn-ghost" data-action="open-scanner">${ICONS.scan} Escanear</button><button class="btn btn-primary" data-action="new-plaque">${ICONS.plus} Nova plaquinha</button>`)}
-      <div class="toolbar"><div class="grow input-with-icon">${ICONS.search}<input id="plaque-search" class="input" placeholder="Buscar por nome, cliente ou código"></div><select id="plaque-filter" class="select" style="width:auto"><option value="all">Todos os status</option><option value="active">Ativas</option><option value="unconfigured">Não configuradas</option><option value="paused">Pausadas</option></select></div>
-      <div class="table-wrap"><table><thead><tr><th>Plaquinha</th><th>Cliente</th><th>Destino</th><th>Acessos mês</th><th>Status</th><th></th></tr></thead><tbody id="plaque-tbody">${rows}</tbody></table></div>
+      <div class="toolbar"><div class="grow input-with-icon">${ICONS.search}<input id="plaque-search" class="input" placeholder="Buscar por nome, cliente, código ou PIN"></div><select id="plaque-filter" class="select" style="width:auto"><option value="all">Todos os status</option><option value="active">Ativas</option><option value="unconfigured">Não configuradas</option><option value="paused">Pausadas</option></select></div>
+      <div class="bulk-bar ${selectionCount?'is-visible':''}" id="plate-bulk-bar"><div><strong>${selectionCount} selecionada${selectionCount===1?'':'s'}</strong><span>Selecione unidades de teste e exclua em uma única operação.</span></div><div class="row wrap"><button class="btn btn-ghost" data-action="clear-plate-selection">Limpar seleção</button><button class="btn btn-danger" data-action="bulk-delete-plates" ${selectionCount?'':'disabled'}>${ICONS.trash} Excluir selecionadas</button></div></div>
+      <div class="table-wrap"><table><thead><tr><th class="select-cell"><label class="check-control" title="Selecionar todas"><input id="select-all-plates" type="checkbox" ${state.plaques.length && selectionCount===state.plaques.length?'checked':''}><span></span></label></th><th>Plaquinha</th><th>PIN</th><th>Cliente</th><th>Destino</th><th>Acessos mês</th><th>Status</th><th></th></tr></thead><tbody id="plaque-tbody">${rows}</tbody></table></div>
       <div class="mobile-list" id="plaque-mobile-list">${cards}</div>`;
   }
 
@@ -414,7 +424,7 @@
       <div class="detail-grid">
         <div class="stack">
           <section class="card plaque-hero"><div class="row-between"><span class="badge ${p.status==='active'?'badge-success':'badge-warning'}">${p.status==='active'?'ATIVA':'STATUS: '+esc(p.status.toUpperCase())}</span><img src="assets/images/tajo-tap-mark.png" alt="" style="width:54px;background:#fff;border-radius:13px;padding:5px"></div><div><div class="plaque-code">${esc(p.code)}</div><div class="plaque-link">${esc(qrUrl)}</div></div></section>
-          <section class="card card-pad"><div class="card-title"><div><h2>Ativação do cliente</h2><p>${esc(setupLabel)}.</p></div><span class="badge ${p.configurationLocked?'badge-success':'badge-warning'}">${p.configurationLocked?'BLOQUEADA':'PENDENTE'}</span></div><div class="form-grid"><div class="field"><label>URL de ativação</label><input class="input mono" readonly value="${esc(activationUrl)}"></div><div class="field"><label>Proprietário</label><input class="input" readonly value="${esc(p.ownerUserId ? 'Conta vinculada' : 'Ainda não vinculado')}"></div></div><div class="row wrap" style="margin-top:14px"><button class="btn btn-ghost" data-action="copy" data-copy="${esc(activationUrl)}">${ICONS.copy} Copiar ativação</button></div></section>
+          <section class="card card-pad"><div class="card-title"><div><h2>Ativação do cliente</h2><p>${esc(setupLabel)}.</p></div><span class="badge ${p.configurationLocked?'badge-success':'badge-warning'}">${p.configurationLocked?'BLOQUEADA':'PENDENTE'}</span></div><div class="form-grid"><div class="field"><label>URL de ativação</label><input class="input mono" readonly value="${esc(activationUrl)}"></div><div class="field"><label>PIN da plaquinha</label><div class="pin-admin-field"><input class="input mono activation-pin-output" readonly value="${esc(p.activationPin || (p.pinConsumedAt || p.configurationLocked ? 'PIN utilizado' : 'PIN legado não recuperável'))}"><div class="row wrap">${p.activationPin?`<button class="btn btn-ghost" data-action="copy" data-copy="${esc(p.activationPin)}">${ICONS.copy} Copiar PIN</button>`:''}${!p.configurationLocked && p.setupStatus!=='completed'?`<button class="btn btn-ghost" data-action="reset-pin" data-code="${esc(p.code)}">${p.activationPin?'Gerar novo PIN':'Gerar PIN visível'}</button>`:''}</div></div><span class="field-help">Disponível apenas para administradores. Em plaquinhas antigas criadas antes da V4.2, gere um novo PIN uma única vez.</span></div></div><div class="form-grid"><div class="field"><label>Proprietário</label><input class="input" readonly value="${esc(p.ownerUserId ? 'Conta vinculada' : 'Ainda não vinculado')}"></div><div class="field"><label>Status do PIN</label><input class="input" readonly value="${esc(p.pinConsumedAt ? 'Utilizado' : p.pinLockedUntil ? 'Temporariamente bloqueado' : p.activationPin ? 'Pronto para envio' : 'Requer novo PIN')}"></div></div><div class="row wrap" style="margin-top:14px"><button class="btn btn-ghost" data-action="copy" data-copy="${esc(activationUrl)}">${ICONS.copy} Copiar ativação</button></div></section>
           <section class="card card-pad"><div class="card-title"><div><h2>Destino atual</h2><p>O QR e o NFC permanecem iguais. Só o destino muda.</p></div>${statusBadge(p.status)}</div><div class="destination-option active"><div class="destination-icon">${destinationIcon(p.destinationType)}</div><div class="destination-copy"><strong>${esc(p.destinationLabel)}</strong><span>${p.destination ? esc(p.destination) : 'O cliente ainda precisa escolher um destino.'}</span></div></div><div class="row wrap" style="margin-top:16px"><button class="btn btn-primary" data-action="edit-destination" data-code="${esc(p.code)}">${ICONS.edit} Alterar destino</button><button class="btn btn-ghost" data-action="toggle-plate" data-code="${esc(p.code)}">${p.status==='paused'?'Ativar plaquinha':'Pausar plaquinha'}</button></div></section>
           <section class="metric-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">${metric('Hoje',formatNumber(p.scansToday),'Acessos','scan')}${metric('Este mês',formatNumber(p.scansMonth),'Acessos','analytics')}${metric('Total',formatNumber(p.scansTotal),'Desde ativação','dashboard')}</section>
         </div>
@@ -447,7 +457,7 @@
   function productionPage() {
     const batches = state.batches || [];
     const recent = state.lastBatch;
-    const recentBlock = recent ? `<section class="card card-pad production-current"><div class="card-title"><div><div class="eyebrow">Lote recém-criado</div><h2>${esc(recent.code)}</h2><p>${esc(recent.label)} · ${recent.quantity} unidades</p></div><span class="badge badge-success">PRONTO</span></div><div class="activation-notice"><strong>Salve o mapa interno agora.</strong> Os PINs aparecem apenas nesta criação. O arquivo para a gráfica contém somente QR permanente e código da unidade.</div><div class="row wrap" style="margin-top:16px"><button class="btn btn-primary" data-action="print-batch" data-id="${esc(recent.id)}">${ICONS.printer} Imprimir / Salvar PDF</button><button class="btn btn-ghost" data-action="download-batch-print" data-id="${esc(recent.id)}">${ICONS.download} Arquivo vetorial HTML</button><button class="btn btn-ghost" data-action="download-batch-map" data-id="${esc(recent.id)}">${ICONS.download} Mapa interno CSV</button></div></section>` : '';
+    const recentBlock = recent ? `<section class="card card-pad production-current"><div class="card-title"><div><div class="eyebrow">Lote recém-criado</div><h2>${esc(recent.code)}</h2><p>${esc(recent.label)} · ${recent.quantity} unidades</p></div><span class="badge badge-success">PRONTO</span></div><div class="activation-notice"><strong>O mapa interno pode ser baixado novamente.</strong> Os PINs ficam disponíveis apenas para administradores. O arquivo da gráfica continua contendo somente QR permanente e código da unidade.</div><div class="row wrap" style="margin-top:16px"><button class="btn btn-primary" data-action="print-batch" data-id="${esc(recent.id)}">${ICONS.printer} Imprimir / Salvar PDF</button><button class="btn btn-ghost" data-action="download-batch-print" data-id="${esc(recent.id)}">${ICONS.download} Arquivo vetorial HTML</button><button class="btn btn-ghost" data-action="download-batch-map" data-id="${esc(recent.id)}">${ICONS.download} Mapa interno CSV</button></div></section>` : '';
     const rows = batches.map(batch => `<tr><td><strong>${esc(batch.code)}</strong><small>${esc(batch.label)}</small></td><td>${batch.quantity}</td><td><span class="badge">${esc(batch.status || 'ready')}</span></td><td>${batch.createdAt ? new Date(batch.createdAt).toLocaleString('pt-BR') : '—'}</td><td><div class="row wrap"><button class="btn btn-sm btn-ghost" data-action="print-batch" data-id="${esc(batch.id)}">${ICONS.printer} Imprimir</button><button class="btn btn-sm btn-ghost" data-action="download-batch-print" data-id="${esc(batch.id)}">${ICONS.download} HTML</button></div></td></tr>`).join('');
     return `${pageHead('Produção','Lotes de plaquinhas','Gere várias unidades de uma vez. Cada peça recebe QR permanente exclusivo no padrão /q/TT-XXXXXX, NFC /n/TT-XXXXXX e ativação /atv/TT-XXXXXX.', `<button class="btn btn-primary" data-action="new-batch">${ICONS.plus} Novo lote</button>`)}
       ${state.productionError ? `<div class="activation-notice" style="margin-bottom:18px"><strong>Atualização necessária:</strong> ${esc(state.productionError)}</div>` : ''}
@@ -538,7 +548,7 @@
   function showCreatedBatch(batch) {
     state.lastBatch = batch;
     const first = batch.items?.[0];
-    showModal(`<div class="modal-head"><div><div class="eyebrow">Lote criado</div><h2>${esc(batch.code)}</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body stack"><div class="destination-option active"><div class="destination-icon">${ICONS.check}</div><div class="destination-copy"><strong>${batch.quantity} plaquinhas prontas para produção</strong><span>Todos os QR Codes seguem o padrão permanente TAJO TAP.</span></div></div><div class="activation-notice"><strong>Importante:</strong> baixe o mapa interno de PINs agora. Os PINs não ficam armazenados em texto puro e não poderão ser recuperados depois.</div>${first?`<div class="form-grid"><div class="field"><label>Primeira unidade</label><input class="input mono" readonly value="${esc(first.code)}"></div><div class="field"><label>Primeiro PIN</label><input class="input mono" readonly value="${esc(first.activationCode)}"></div></div>`:''}</div><div class="modal-footer"><button class="btn btn-ghost" data-action="download-batch-map" data-id="${esc(batch.id)}">${ICONS.download} Mapa de PINs</button><button class="btn btn-ghost" data-action="download-batch-print" data-id="${esc(batch.id)}">${ICONS.download} Arquivo impressão</button><button class="btn btn-primary" data-action="print-batch" data-id="${esc(batch.id)}">${ICONS.printer} Salvar PDF / Imprimir</button></div>`);
+    showModal(`<div class="modal-head"><div><div class="eyebrow">Lote criado</div><h2>${esc(batch.code)}</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body stack"><div class="destination-option active"><div class="destination-icon">${ICONS.check}</div><div class="destination-copy"><strong>${batch.quantity} plaquinhas prontas para produção</strong><span>Todos os QR Codes seguem o padrão permanente TAJO TAP.</span></div></div><div class="activation-notice"><strong>PINs administrativos:</strong> o mapa interno poderá ser baixado novamente pelo administrador. Nunca envie este arquivo completo para a gráfica.</div>${first?`<div class="form-grid"><div class="field"><label>Primeira unidade</label><input class="input mono" readonly value="${esc(first.code)}"></div><div class="field"><label>Primeiro PIN</label><input class="input mono" readonly value="${esc(first.activationCode)}"></div></div>`:''}</div><div class="modal-footer"><button class="btn btn-ghost" data-action="download-batch-map" data-id="${esc(batch.id)}">${ICONS.download} Mapa de PINs</button><button class="btn btn-ghost" data-action="download-batch-print" data-id="${esc(batch.id)}">${ICONS.download} Arquivo impressão</button><button class="btn btn-primary" data-action="print-batch" data-id="${esc(batch.id)}">${ICONS.printer} Salvar PDF / Imprimir</button></div>`);
   }
 
   function analyticsPage() {
@@ -798,7 +808,7 @@
     const qrUrl = `https://${CONFIG.goDomain}${CONFIG.platePath}${plate.code}`;
     const nfcUrl = `https://${CONFIG.goDomain}${CONFIG.nfcPath || '/n/'}${plate.code}`;
     const activationUrl = `https://${CONFIG.goDomain}${CONFIG.activationPath || '/atv/'}${plate.code}`;
-    showModal(`<div class="modal-head"><div><div class="eyebrow">Plaquinha criada</div><h2>${esc(plate.code)}</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body stack"><div class="destination-option active"><div class="destination-icon">${ICONS.check}</div><div class="destination-copy"><strong>Pronta para produção</strong><span>O QR e o NFC são permanentes. Enquanto estiver pendente, ambos conduzem o cliente para a ativação.</span></div></div><div class="form-grid"><div class="field"><label>Link do QR Code</label><input class="input mono" readonly value="${esc(qrUrl)}"></div><div class="field"><label>Link do NFC</label><input class="input mono" readonly value="${esc(nfcUrl)}"></div></div><div class="form-grid"><div class="field"><label>Página de ativação</label><input class="input mono" readonly value="${esc(activationUrl)}"></div><div class="field"><label>PIN de ativação</label><input class="input mono activation-pin-output" readonly value="${esc(activationCode||'—')}"><span class="field-help">Entregue este PIN junto com a plaquinha. Ele é exibido somente na criação.</span></div></div><div class="qr-frame" style="width:220px;margin:auto"><canvas class="qr-canvas" data-qr="${esc(qrUrl)}" width="440" height="440"></canvas></div><div class="activation-notice"><strong>Fluxo:</strong> QR/NFC → <span class="mono">/atv/${esc(plate.code)}</span> enquanto pendente → destino final depois da ativação.</div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="copy" data-copy="${esc(activationUrl)}">${ICONS.copy} Copiar ativação</button><button class="btn btn-ghost" data-action="copy" data-copy="${esc(nfcUrl)}">${ICONS.wifi} Copiar NFC</button><button class="btn btn-primary" data-action="close-modal">Concluir</button></div>`);
+    showModal(`<div class="modal-head"><div><div class="eyebrow">Plaquinha criada</div><h2>${esc(plate.code)}</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body stack"><div class="destination-option active"><div class="destination-icon">${ICONS.check}</div><div class="destination-copy"><strong>Pronta para produção</strong><span>O QR e o NFC são permanentes. Enquanto estiver pendente, ambos conduzem o cliente para a ativação.</span></div></div><div class="form-grid"><div class="field"><label>Link do QR Code</label><input class="input mono" readonly value="${esc(qrUrl)}"></div><div class="field"><label>Link do NFC</label><input class="input mono" readonly value="${esc(nfcUrl)}"></div></div><div class="form-grid"><div class="field"><label>Página de ativação</label><input class="input mono" readonly value="${esc(activationUrl)}"></div><div class="field"><label>PIN de ativação</label><input class="input mono activation-pin-output" readonly value="${esc(activationCode||'—')}"><span class="field-help">Entregue este PIN junto com a plaquinha. Ele também ficará disponível para administradores no cadastro da unidade.</span></div></div><div class="qr-frame" style="width:220px;margin:auto"><canvas class="qr-canvas" data-qr="${esc(qrUrl)}" width="440" height="440"></canvas></div><div class="activation-notice"><strong>Fluxo:</strong> QR/NFC → <span class="mono">/atv/${esc(plate.code)}</span> enquanto pendente → destino final depois da ativação.</div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="copy" data-copy="${esc(activationUrl)}">${ICONS.copy} Copiar ativação</button><button class="btn btn-ghost" data-action="copy" data-copy="${esc(nfcUrl)}">${ICONS.wifi} Copiar NFC</button><button class="btn btn-primary" data-action="close-modal">Concluir</button></div>`);
     renderQRCodes();
   }
 
@@ -934,6 +944,20 @@
     showModal(`<div class="modal-head"><div><div class="eyebrow">Ação irreversível</div><h2>Excluir ${esc(p.code)}?</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body stack"><div class="danger-alert">${ICONS.trash}<div><strong>Esta exclusão é permanente.</strong><p>Serão removidos a plaquinha, PIN de ativação, destinos e eventos vinculados. Use principalmente para unidades criadas em testes.</p></div></div><div class="field"><label for="delete-plate-confirm">Digite <span class="mono">${esc(p.code)}</span> para confirmar</label><input id="delete-plate-confirm" class="input mono" autocomplete="off" placeholder="${esc(p.code)}"></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-danger" data-action="confirm-delete-plate" data-code="${esc(p.code)}">${ICONS.trash} Excluir definitivamente</button></div>`);
   }
 
+
+  function resetPinModal(code) {
+    const p = state.plaques.find(x=>x.code===code); if(!p) return;
+    const hasPin = Boolean(p.activationPin);
+    showModal(`<div class="modal-head"><div><div class="eyebrow">PIN de ativação</div><h2>${hasPin?'Gerar novo PIN':'Gerar PIN visível'} · ${esc(p.code)}</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body stack"><div class="activation-notice"><strong>${hasPin?'O PIN atual deixará de funcionar.':'Esta plaquinha é de uma versão anterior.'}</strong> ${hasPin?'Use esta opção somente se precisar substituir o código entregue ao cliente.':'Como os PINs antigos eram salvos somente como hash, não é possível recuperar o número original. O sistema vai gerar um novo código de 6 dígitos e invalidar o anterior.'}</div>${hasPin?`<div class="field"><label>PIN atual</label><input class="input mono activation-pin-output" readonly value="${esc(p.activationPin)}"></div>`:''}</div><div class="modal-footer"><button class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary" data-action="confirm-reset-pin" data-code="${esc(p.code)}">${ICONS.lock} ${hasPin?'Substituir PIN':'Gerar novo PIN'}</button></div>`);
+  }
+
+  function bulkDeleteModal() {
+    const selected = (state.selectedPlateCodes || []).filter(code => state.plaques.some(p => p.code === code));
+    if (!selected.length) { toast('Selecione plaquinhas','Marque pelo menos uma unidade para excluir.'); return; }
+    const phrase = `EXCLUIR ${selected.length}`;
+    showModal(`<div class="modal-head"><div><div class="eyebrow">Exclusão em massa</div><h2>Excluir ${selected.length} plaquinha${selected.length===1?'':'s'}?</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><div class="modal-body stack"><div class="danger-alert">${ICONS.trash}<div><strong>Esta operação é irreversível.</strong><p>Use principalmente para limpar unidades criadas em testes. Destinos, PINs, scans e vínculos dependentes serão removidos junto com cada plaquinha.</p></div></div><div class="bulk-code-list">${selected.slice(0,18).map(code=>`<span class="mono">${esc(code)}</span>`).join('')}${selected.length>18?`<span>+ ${selected.length-18} outras</span>`:''}</div><div class="field"><label>Digite <span class="mono">${esc(phrase)}</span> para confirmar</label><input id="bulk-delete-confirm" class="input mono" autocomplete="off" placeholder="${esc(phrase)}"></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-danger" data-action="confirm-bulk-delete" data-count="${selected.length}">${ICONS.trash} Excluir ${selected.length}</button></div>`);
+  }
+
   function generateCode() {
     const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s='TT-';
     for(let i=0;i<6;i++) s+=chars[Math.floor(Math.random()*chars.length)];
@@ -974,7 +998,7 @@
     if(routeEl){ e.preventDefault(); go(routeEl.dataset.route); return; }
     const actionEl=e.target.closest('[data-action]'); if(!actionEl) return;
     const action=actionEl.dataset.action;
-    if(action==='logout'||action==='portal-exit'){ try{await apiFetch('/api/auth/logout',{method:'POST'});}catch{} state.role=null;state.sessionRole=null;state.user=null;state.plaques=[];state.clients=[];go('login'); }
+    if(action==='logout'||action==='portal-exit'){ try{await apiFetch('/api/auth/logout',{method:'POST'});}catch{} state.role=null;state.sessionRole=null;state.user=null;state.plaques=[];state.clients=[];state.selectedPlateCodes=[];go('login'); }
     if(action==='toggle-sidebar'){state.sidebarOpen=!state.sidebarOpen;render();}
     if(action==='close-sidebar'){state.sidebarOpen=false;render();}
     if(action==='theme'){setTheme(state.theme==='dark'?'light':'dark');render();}
@@ -1005,6 +1029,31 @@
     if(action==='copy-sales-script'){ const item=PLAYBOOK.scripts.find(x=>x.id===actionEl.dataset.scriptId); if(item) copyText(item.text); }
     if(action==='copy-objection'){ const item=PLAYBOOK.objections.find(x=>x.id===actionEl.dataset.objectionId); if(item) copyText(item.answer); }
     if(action==='sales-routine'){ copyText((PLAYBOOK.routine||[]).map((x,i)=>`${i+1}. ${x}`).join('\n')); }
+    if(action==='reset-pin' && state.role==='admin') resetPinModal(actionEl.dataset.code);
+    if(action==='confirm-reset-pin' && state.role==='admin'){
+      const code=actionEl.dataset.code; if(state.busy) return; state.busy=true; actionEl.disabled=true;
+      try { const out=await apiFetch(`/api/admin/plate?code=${encodeURIComponent(code)}`,{method:'PATCH',body:{action:'reset-pin'}}); const p=state.plaques.find(x=>x.code===code); if(p) Object.assign(p,out.plate); closeModal(); toast('Novo PIN gerado',`${code} · PIN ${out.activationCode}`); render(); }
+      catch(err){ toast('Não foi possível gerar o PIN',err.message); actionEl.disabled=false; } finally { state.busy=false; }
+    }
+    if(action==='clear-plate-selection' && state.role==='admin'){ state.selectedPlateCodes=[]; render(); }
+    if(action==='bulk-delete-plates' && state.role==='admin') bulkDeleteModal();
+    if(action==='confirm-bulk-delete' && state.role==='admin'){
+      const selected=(state.selectedPlateCodes||[]).filter(code=>state.plaques.some(p=>p.code===code));
+      const expected=`EXCLUIR ${selected.length}`; const typed=String($('#bulk-delete-confirm')?.value||'').trim().toUpperCase();
+      if(!selected.length){ closeModal(); toast('Nada selecionado'); return; }
+      if(typed!==expected){ toast('Confirmação incorreta',`Digite ${expected} exatamente.`); return; }
+      if(state.busy) return; state.busy=true; actionEl.disabled=true;
+      try {
+        const deletedCodes=[];
+        for(let i=0;i<selected.length;i+=100){
+          const chunk=selected.slice(i,i+100);
+          const out=await apiFetch('/api/admin/plates/bulk-delete',{method:'POST',body:{codes:chunk}});
+          deletedCodes.push(...(out.deleted||chunk));
+        }
+        const deleted=new Set(deletedCodes); state.plaques=state.plaques.filter(p=>!deleted.has(p.code)); state.selectedPlateCodes=[]; closeModal(); toast('Plaquinhas excluídas',`${deleted.size} unidade(s) removida(s).`); render();
+      }
+      catch(err){ toast('Não foi possível excluir em massa',err.message); actionEl.disabled=false; } finally { state.busy=false; }
+    }
     if(action==='delete-plate' && state.role==='admin') deletePlateModal(actionEl.dataset.code);
     if(action==='confirm-delete-plate' && state.role==='admin'){
       const code=actionEl.dataset.code; const confirmCode=String($('#delete-plate-confirm')?.value||'').trim().toUpperCase();
@@ -1129,6 +1178,15 @@
   });
 
   document.addEventListener('change',async(e)=>{
+    if(e.target.matches('[data-plate-select]')){
+      const code=String(e.target.dataset.plateSelect||''); const selected=new Set(state.selectedPlateCodes||[]);
+      if(e.target.checked) selected.add(code); else selected.delete(code);
+      state.selectedPlateCodes=[...selected]; render(); return;
+    }
+    if(e.target.id==='select-all-plates'){
+      state.selectedPlateCodes=e.target.checked ? state.plaques.map(p=>p.code) : [];
+      render(); return;
+    }
     if(e.target.classList.contains('seller-lead-status')){try{await apiFetch('/api/seller/hub',{method:'PATCH',body:{kind:'lead',id:e.target.dataset.id,status:e.target.value}});await loadSellerData();toast('Lead atualizado');}catch(err){toast('Não foi possível atualizar',err.message);}return;}
     if(e.target.id==='qr-image-input' && e.target.files?.[0]) scanImage(e.target.files[0]);
   });
