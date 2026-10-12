@@ -12,7 +12,7 @@ async function walk(dir) {
   return out;
 }
 
-const roots = ['api', 'assets/js', 'tests'];
+const roots = ['api', 'server', 'assets/js', 'tests'];
 const files = [];
 for (const root of roots) files.push(...await walk(root));
 for (const file of files) {

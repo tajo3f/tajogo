@@ -134,3 +134,5 @@ A V3.3.1 usa uma única migration incremental: `supabase/migrations/002_plate_ac
 ## V3.3.1 — correção migration 42P13
 
 A migration 002 agora remove e recria explicitamente as RPCs de ativação antes de defini-las. Isso corrige o erro PostgreSQL `42P13: cannot change return type of existing function` em bancos onde uma versão anterior da função já existia. A view administrativa também preserva as colunas antigas na mesma ordem e adiciona os novos campos somente no final.
+## V3.4.1 — Vercel Hobby
+Esta versão consolida a API em uma única Vercel Function (`api/index.js`). Os módulos em `server/` são código interno importado pela função e não criam funções serverless separadas. As rotas públicas existentes continuam iguais por meio de `vercel.json`. Não há nova migration de banco para esta correção.
