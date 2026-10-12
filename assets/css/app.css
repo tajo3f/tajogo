@@ -680,3 +680,10 @@ tbody tr:hover { background:var(--surface-2); }
   .sales-script-text { padding:13px; }
   .sidebar-logout { min-height:46px; }
 }
+
+/* TAJO TAP V4 — seller module */
+.system-credit{margin:36px 0 88px;text-align:center;color:var(--muted);font-size:.78rem}.system-credit strong{color:var(--text)}
+.seller-admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.seller-admin-metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:18px 0}.seller-admin-metrics>div{padding:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2)}.seller-admin-metrics span{display:block;color:var(--muted);font-size:.72rem}.seller-admin-metrics strong{font-size:1rem}.seller-row{padding:12px 0;border-bottom:1px solid var(--border)}
+.team-chat{max-width:980px;margin:auto;overflow:hidden}.chat-messages{height:min(58vh,620px);overflow:auto;padding:22px;display:flex;flex-direction:column;gap:12px;background:var(--surface-2)}.chat-message{max-width:76%;padding:12px 14px;border:1px solid var(--border);border-radius:16px 16px 16px 4px;background:var(--surface)}.chat-message.mine{align-self:flex-end;border-radius:16px 16px 4px 16px}.chat-message p{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.chat-meta{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.chat-meta span{font-size:.68rem;color:var(--muted)}.chat-compose{display:flex;gap:10px;padding:14px;border-top:1px solid var(--border);align-items:flex-end}.chat-compose textarea{resize:none;min-height:54px}.chat-compose .btn{min-height:54px}.seller-shell .sidebar-context{border-color:rgba(84,255,0,.18)}
+@media(max-width:900px){.seller-admin-grid{grid-template-columns:1fr}.chat-message{max-width:90%}.chat-messages{height:56vh}.chat-compose{flex-direction:column}.chat-compose .btn{width:100%}}
+@media(max-width:560px){.seller-admin-metrics{grid-template-columns:1fr 1fr}.team-chat{border-radius:0}.chat-messages{padding:12px}.chat-message{max-width:94%}}

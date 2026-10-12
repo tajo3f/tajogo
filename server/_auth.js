@@ -76,6 +76,11 @@ export async function resolveRole(userId) {
   );
   if (Array.isArray(admins) && admins[0]) return { role: 'admin', adminRole: admins[0].role };
 
+  const sellers = await supabaseRest(
+    `tap_sellers?user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=id,user_id,full_name,phone,commission_rate,active&limit=1`
+  );
+  if (Array.isArray(sellers) && sellers[0]) return { role: 'seller', seller: sellers[0] };
+
   const memberships = await supabaseRest(
     `tap_client_members?user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=client_id,role&order=created_at.asc`
   );
@@ -118,4 +123,28 @@ export async function requireClient(req, res) {
 
 export function membershipClientIds(auth) {
   return (auth?.memberships || []).map((m) => m.client_id).filter(Boolean);
+}
+
+
+export async function requireSeller(req, res) {
+  const user = await requireUser(req, res);
+  if (!user) return null;
+  const role = await resolveRole(user.id);
+  if (role.role !== 'seller') {
+    res.status(403).json({ ok: false, error: 'SELLER_REQUIRED', message: 'Esta ação é exclusiva de vendedores TAJO.' });
+    return null;
+  }
+  return { user, ...role };
+}
+
+export async function requireSellerOrAdmin(req, res) {
+  const user = await requireUser(req, res);
+  if (!user) return null;
+  const role = await resolveRole(user.id);
+  if (!['seller','admin'].includes(role.role)) {
+    res.status(403).json({ ok: false, error: 'TEAM_REQUIRED', message: 'Esta área é exclusiva da equipe TAJO.' });
+    return null;
+  }
+  const profiles = await supabaseRest(`tap_profiles?id=eq.${encodeURIComponent(user.id)}&select=full_name&limit=1`);
+  return { user, ...role, userName: profiles?.[0]?.full_name || null };
 }

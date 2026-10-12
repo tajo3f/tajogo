@@ -16,6 +16,7 @@ export default async function handler(req, res) {
       ok: true,
       authenticated: true,
       role: role.role,
+      seller: role.role === 'seller' ? role.seller : undefined,
       user: {
         id: user.id,
         email: user.email || '',

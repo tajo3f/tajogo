@@ -1,4 +1,4 @@
-/* TAJO TAP Frontend + Backend V3.4
+/* TAJO TAP Frontend + Backend V4
  * Production-oriented SPA connected to Vercel Functions + Supabase.
  * Sensitive Supabase keys stay server-side; browser talks only to same-origin /api routes.
  */
@@ -59,6 +59,10 @@
     theme: persisted.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
     plaques: [],
     clients: [],
+    sellers: [],
+    adminSales: [],
+    sellerData: { seller:null, metrics:{}, leads:[], sales:[], messages:[] },
+    chatTimer: null,
     sidebarOpen: false,
     busy: false,
     activation: { step: 1, selected: 'google', code: '', value: '', message: '', pin: '', plate: null, loading: false, loaded: false, error: '', accountMode: 'signup', fullName: '', companyName: '', phone: '', email: '', password: '', completed: false, sessionReady: false, confirmationRequired: false },
@@ -109,9 +113,20 @@
     state.clients = [];
   }
 
+  async function loadSellerData() {
+    const result = await apiFetch('/api/seller/hub');
+    state.sellerData = { ...state.sellerData, ...result };
+    state.plaques = []; state.clients = [];
+  }
+  async function loadSellersAdmin() {
+    const result = await apiFetch('/api/admin/sellers');
+    state.sellers = Array.isArray(result.sellers) ? result.sellers : [];
+    state.adminSales = Array.isArray(result.sales) ? result.sales : [];
+  }
   async function refreshRoleData() {
-    if (state.role === 'admin') return loadAdminData();
+    if (state.role === 'admin') return Promise.all([loadAdminData(), loadSellersAdmin()]);
     if (state.role === 'client') return loadClientData();
+    if (state.role === 'seller') return loadSellerData();
   }
 
   async function bootstrap() {
@@ -120,7 +135,7 @@
       if (session.authenticated) {
         state.user = session.user || null;
         state.sessionRole = session.role || 'unassigned';
-        if (session.role === 'admin' || session.role === 'client') {
+        if (session.role === 'admin' || session.role === 'client' || session.role === 'seller') {
           state.role = session.role;
           await refreshRoleData();
         }
@@ -190,9 +205,11 @@
       if (r.name !== 'portal') return go('portal');
       return renderPortal();
     }
+    if (state.role === 'seller') return renderSellerApp(r);
     if (r.name === 'portal') return go('dashboard');
     app.innerHTML = shell(renderPage(r), r.name);
     bindPageEnhancements(r);
+    if(r.name==='team-chat') startChatPolling(); else stopChatPolling();
   }
 
   function renderLoading() {
@@ -237,6 +254,8 @@
       ['clients','clients','Clientes'],
       ['analytics','analytics','Analytics'],
       ['sales','sales','Vendas'],
+      ['sellers','clients','Vendedores'],
+      ['team-chat','bell','Chat da equipe'],
       ['settings','settings','Configurações']
     ];
     const navHtml = nav.map(([path, icon, label]) => `<a class="nav-item ${active === path || (active === 'plaque' && path === 'plaques') ? 'active':''}" href="#/${path}">${ICONS[icon]}<span>${label}</span></a>`).join('');
@@ -264,7 +283,7 @@
               <button class="btn btn-icon btn-ghost" data-action="notifications" aria-label="Notificações">${ICONS.bell}</button>
             </div>
           </header>
-          <main class="content">${content}</main>
+          <main class="content">${content}<footer class="system-credit">Sistema desenvolvido por <strong>João Paulo Brandão</strong></footer></main>
         </div>
         <nav class="mobile-bottom-nav" aria-label="Navegação móvel">
           <a class="${active==='dashboard'?'active':''}" href="#/dashboard">${ICONS.dashboard}<span>Início</span></a>
@@ -276,6 +295,30 @@
       </div>`;
   }
 
+  function brl(cents){ return new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(cents||0)/100); }
+
+  function sellerShell(content, active){
+    const nav=[['seller-dashboard','dashboard','Visão geral'],['seller-leads','target','Meus leads'],['seller-sales','sales','Minhas vendas'],['sales','sales','Playbook'],['team-chat','bell','Chat da equipe'],['seller-settings','settings','Minha conta']];
+    const navHtml=nav.map(([path,icon,label])=>`<a class="nav-item ${active===path?'active':''}" href="#/${path}">${ICONS[icon]}<span>${label}</span></a>`).join('');
+    return `<div class="app-shell seller-shell"><aside class="sidebar ${state.sidebarOpen?'open':''}"><div class="sidebar-logo"><img src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"></div><div class="sidebar-context"><img class="context-mark" src="assets/images/tajo-tap-mark.png" alt=""><div class="context-copy"><strong>TAJO TAP</strong><span>Equipe comercial</span></div></div><nav class="nav-group"><div class="nav-label">Meu trabalho</div>${navHtml}</nav><div class="sidebar-spacer"></div><div class="sidebar-user"><div class="avatar">${esc(userInitials())}</div><div class="meta"><strong>${esc(state.sellerData.seller?.full_name||state.user?.name||'Vendedor')}</strong><span>Vendedor TAJO</span></div></div><button class="sidebar-logout" data-action="logout">${ICONS.logout}<span>Sair da conta</span></button></aside><div class="drawer-backdrop ${state.sidebarOpen?'show':''}" data-action="close-sidebar"></div><div class="app-main"><header class="topbar"><button class="btn btn-icon btn-ghost mobile-menu-btn" data-action="toggle-sidebar">${ICONS.menu}</button><a class="mobile-brand" href="#/seller-dashboard"><img src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"></a><div class="topbar-title"><strong>Central Comercial</strong><span>Seus dados, suas vendas, sua evolução</span></div><div class="topbar-actions"><button class="btn btn-icon btn-ghost" data-action="theme">${state.theme==='dark'?ICONS.sun:ICONS.moon}</button></div></header><main class="content">${content}<footer class="system-credit">Sistema desenvolvido por <strong>João Paulo Brandão</strong></footer></main></div><nav class="mobile-bottom-nav"><a class="${active==='seller-dashboard'?'active':''}" href="#/seller-dashboard">${ICONS.dashboard}<span>Início</span></a><a class="${active==='seller-leads'?'active':''}" href="#/seller-leads">${ICONS.target}<span>Leads</span></a><a class="${active==='seller-sales'?'active':''}" href="#/seller-sales">${ICONS.sales}<span>Vendas</span></a><a class="${active==='team-chat'?'active':''}" href="#/team-chat">${ICONS.bell}<span>Chat</span></a><a class="${active==='sales'?'active':''}" href="#/sales">${ICONS.copy}<span>Scripts</span></a></nav></div>`;
+  }
+
+  function renderSellerApp(r){
+    const allowed=new Set(['seller-dashboard','seller-leads','seller-sales','sales','team-chat','seller-settings']);
+    if(!allowed.has(r.name)) return go('seller-dashboard');
+    const content=r.name==='seller-dashboard'?sellerDashboardPage():r.name==='seller-leads'?sellerLeadsPage():r.name==='seller-sales'?sellerSalesPage():r.name==='sales'?salesPage():r.name==='team-chat'?teamChatPage():sellerSettingsPage();
+    app.innerHTML=sellerShell(content,r.name); bindPageEnhancements(r); if(r.name==='team-chat') startChatPolling(); else stopChatPolling();
+  }
+  function sellerDashboardPage(){ const m=state.sellerData.metrics||{}; const rate=state.sellerData.seller?.commission_rate||0; return `${pageHead('Painel do vendedor','Seu desempenho, sem ruído.','Aqui você vê somente seus próprios leads, vendas e comissões. Os dados de outros vendedores permanecem isolados.',`<button class="btn btn-primary" data-action="new-seller-lead">${ICONS.plus} Novo lead</button>`)}<section class="metric-grid">${metric('Meus leads',m.leads||0,'Oportunidades cadastradas','target')}${metric('Vendas registradas',m.sales||0,`${m.won||0} leads fechados`,'sales')}${metric('Vendas pagas',brl(m.revenue_cents),'Somente suas vendas','analytics')}${metric('Minha comissão',brl(m.commission_cents),`${rate}% configurado pela TAJO`,'star')}</section><section class="dashboard-grid"><div class="card card-pad"><div class="card-title"><div><h2>Pipeline recente</h2><p>Continue de onde parou.</p></div><a class="btn btn-sm btn-ghost" href="#/seller-leads">Ver leads</a></div>${(state.sellerData.leads||[]).slice(0,6).map(l=>`<div class="row-between seller-row"><div><strong>${esc(l.business_name)}</strong><div class="text-muted">${esc(l.city||l.niche||'Sem local informado')}</div></div><span class="badge">${esc(l.status)}</span></div>`).join('')||'<div class="empty-state">Nenhum lead cadastrado ainda.</div>'}</div><div class="card card-pad"><div class="card-title"><div><h2>Atalhos comerciais</h2><p>Venda com processo.</p></div></div><div class="quick-actions">${quick('Cadastrar lead','Registre a oportunidade antes de abordar.','target','new-seller-lead')}${quick('Registrar venda','Sua comissão é calculada pelo sistema.','sales','new-seller-sale')}${quick('Abrir playbook','Scripts, objeções e neuromarketing ético.','copy','go-sales')}${quick('Chat da equipe','Troque aprendizados com os vendedores.','bell','go-team-chat')}</div></div></section>`; }
+  function sellerLeadsPage(){ const leads=state.sellerData.leads||[]; return `${pageHead('CRM individual','Meus leads','Somente você e a administração TAJO podem visualizar sua carteira.',`<button class="btn btn-primary" data-action="new-seller-lead">${ICONS.plus} Novo lead</button>`)}<div class="card table-card"><div class="responsive-table"><table><thead><tr><th>Negócio</th><th>Contato</th><th>Cidade</th><th>Status</th><th>Próximo contato</th></tr></thead><tbody>${leads.map(l=>`<tr><td><strong>${esc(l.business_name)}</strong><small>${esc(l.niche||'')}</small></td><td>${esc(l.contact_name||'—')}<small>${esc(l.phone||'')}</small></td><td>${esc(l.city||'—')}</td><td><select class="select seller-lead-status" data-id="${esc(l.id)}">${['novo','contatado','respondeu','negociacao','proposta','fechado','perdido'].map(x=>`<option ${l.status===x?'selected':''} value="${x}">${x}</option>`).join('')}</select></td><td>${l.next_contact_at?new Date(l.next_contact_at).toLocaleString('pt-BR'):'—'}</td></tr>`).join('')||'<tr><td colspan="5">Nenhum lead cadastrado.</td></tr>'}</tbody></table></div></div>`; }
+  function sellerSalesPage(){ const sales=state.sellerData.sales||[]; return `${pageHead('Resultados individuais','Minhas vendas','Valores e comissões são calculados exclusivamente a partir das suas vendas.',`<button class="btn btn-primary" data-action="new-seller-sale">${ICONS.plus} Registrar venda</button>`)}<div class="card table-card"><div class="responsive-table"><table><thead><tr><th>Cliente</th><th>Venda</th><th>Comissão</th><th>Status</th><th>Data</th></tr></thead><tbody>${sales.map(x=>`<tr><td><strong>${esc(x.customer_name)}</strong></td><td>${brl(x.amount_cents)}</td><td>${brl(x.commission_cents)} <small>${x.commission_rate}%</small></td><td><span class="badge">${esc(x.status)}</span></td><td>${new Date(x.sold_at).toLocaleDateString('pt-BR')}</td></tr>`).join('')||'<tr><td colspan="5">Nenhuma venda registrada.</td></tr>'}</tbody></table></div></div>`; }
+  function sellerSettingsPage(){ return `${pageHead('Minha conta','Perfil comercial','Seus dados de acesso e sua regra de comissão.') }<div class="card card-pad settings-card"><div class="settings-row"><div><strong>${esc(state.sellerData.seller?.full_name||state.user?.name||'Vendedor')}</strong><span>${esc(state.user?.email||'')}</span></div><span class="badge badge-success">VENDEDOR ATIVO</span></div><div class="settings-row"><div><strong>Comissão configurada</strong><span>Definida pela administração TAJO</span></div><strong>${esc(state.sellerData.seller?.commission_rate||0)}%</strong></div><button class="btn btn-danger" data-action="logout">${ICONS.logout} Sair da conta</button></div>`; }
+  function adminSellersPage(){ return `${pageHead('Equipe comercial','Vendedores','Gerencie acesso, comissão e acompanhe resultados individuais sem misturar carteiras.',`<button class="btn btn-primary" data-action="new-seller">${ICONS.plus} Vincular vendedor</button>`)}<section class="seller-admin-grid">${(state.sellers||[]).map(s=>`<article class="card card-pad"><div class="row-between"><div><div class="eyebrow">${s.active?'ATIVO':'INATIVO'}</div><h2>${esc(s.full_name)}</h2><p>${esc(s.phone||'Sem telefone')}</p></div><span class="badge">${esc(s.commission_rate)}%</span></div><div class="seller-admin-metrics"><div><span>Leads</span><strong>${s.metrics?.leads||0}</strong></div><div><span>Vendas</span><strong>${s.metrics?.sales||0}</strong></div><div><span>Receita paga</span><strong>${brl(s.metrics?.revenue_cents)}</strong></div><div><span>Comissão</span><strong>${brl(s.metrics?.commission_cents)}</strong></div></div><button class="btn btn-sm btn-ghost" data-action="toggle-seller" data-id="${esc(s.id)}" data-active="${s.active?'1':'0'}">${s.active?'Desativar acesso':'Reativar acesso'}</button></article>`).join('')||'<div class="card card-pad"><h2>Nenhum vendedor vinculado</h2><p>Crie a conta no Supabase Auth e vincule por e-mail aqui.</p></div>'}</section><section class="card table-card" style="margin-top:18px"><div class="card-title card-pad"><div><h2>Vendas aguardando validação</h2><p>Comissão só entra nos resultados pagos após aprovação administrativa.</p></div></div><div class="responsive-table"><table><thead><tr><th>Valor</th><th>Comissão</th><th>Status</th><th>Ação</th></tr></thead><tbody>${(state.adminSales||[]).filter(x=>x.status==='pending').map(x=>`<tr><td>${brl(x.amount_cents)}</td><td>${brl(x.commission_cents)}</td><td><span class="badge">Pendente</span></td><td><button class="btn btn-sm btn-primary" data-action="approve-sale" data-id="${esc(x.id)}">Aprovar pagamento</button></td></tr>`).join('')||'<tr><td colspan="4">Nenhuma venda pendente.</td></tr>'}</tbody></table></div></section>`; }
+  function teamChatPage(){ const msgs=state.sellerData.messages||[]; return `${pageHead('Equipe TAJO','Chat dos vendedores','Canal interno compartilhado entre vendedores ativos e administradores. As mensagens ficam salvas no banco.') }<section class="card team-chat"><div class="chat-messages" id="chat-messages">${msgs.map(m=>`<div class="chat-message ${m.sender_user_id===state.user?.id?'mine':''}"><div class="chat-meta"><strong>${esc(m.sender_name)}</strong><span>${m.sender_role==='admin'?'Admin':'Vendedor'} · ${new Date(m.created_at).toLocaleString('pt-BR')}</span></div><p>${esc(m.body)}</p></div>`).join('')||'<div class="empty-state">Nenhuma mensagem ainda. Comece a conversa.</div>'}</div><form id="team-chat-form" class="chat-compose"><textarea class="input" name="body" maxlength="1200" rows="2" placeholder="Escreva para a equipe..." required></textarea><button class="btn btn-primary">Enviar ${ICONS.arrow}</button></form></section>`; }
+  async function refreshChat(){ try{ const out=await apiFetch('/api/seller/chat'); state.sellerData.messages=out.messages||[]; if(route().name==='team-chat'){ const box=$('#chat-messages'); if(box){box.innerHTML=state.sellerData.messages.map(m=>`<div class="chat-message ${m.sender_user_id===state.user?.id?'mine':''}"><div class="chat-meta"><strong>${esc(m.sender_name)}</strong><span>${m.sender_role==='admin'?'Admin':'Vendedor'} · ${new Date(m.created_at).toLocaleString('pt-BR')}</span></div><p>${esc(m.body)}</p></div>`).join(''); box.scrollTop=box.scrollHeight;}} }catch{} }
+  function startChatPolling(){ stopChatPolling(); refreshChat(); state.chatTimer=setInterval(refreshChat,3000); }
+  function stopChatPolling(){ if(state.chatTimer){clearInterval(state.chatTimer);state.chatTimer=null;} }
+
   function renderPage(r) {
     if (r.name === 'dashboard') return dashboardPage();
     if (r.name === 'plaques') return plaquesPage();
@@ -284,6 +327,8 @@
     if (r.name === 'clients') return clientsPage();
     if (r.name === 'analytics') return analyticsPage();
     if (r.name === 'sales') return salesPage();
+    if (r.name === 'sellers') return adminSellersPage();
+    if (r.name === 'team-chat') return teamChatPage();
     if (r.name === 'settings') return settingsPage();
     return notFoundPage();
   }
@@ -440,7 +485,7 @@
         <main class="content">
           ${pageHead('Área do cliente','Minhas plaquinhas','Gerencie para onde seus clientes serão direcionados. O QR e o NFC físicos não precisam ser trocados.', '')}
           <div class="portal-grid">${owned.map(p=>`<article class="card portal-plaque"><div class="row-between"><div class="entity"><div class="entity-icon">${ICONS.plate}</div><div class="entity-copy"><strong>${esc(p.name)}</strong><span class="mono">${esc(p.code)}</span></div></div>${statusBadge(p.status)}</div><div class="destination-option active" style="margin-top:18px"><div class="destination-icon">${destinationIcon(p.destinationType)}</div><div class="destination-copy"><strong>${esc(p.destinationLabel)}</strong><span>Destino atual</span></div></div><div class="row wrap" style="margin-top:18px"><button class="btn btn-primary" data-action="edit-destination" data-code="${esc(p.code)}">Alterar destino</button><span class="chip">${formatNumber(p.scansMonth)} acessos/mês</span></div></article>`).join('')}</div>
-        </main>
+        <footer class="system-credit">Sistema desenvolvido por <strong>João Paulo Brandão</strong></footer></main>
       </div>`;
     bindPageEnhancements({name:'portal'});
   }
@@ -833,6 +878,12 @@
     if(action==='go-plaques') go('plaques');
     if(action==='go-analytics') go('analytics');
     if(action==='go-sales') go('sales');
+    if(action==='go-team-chat') go('team-chat');
+    if(action==='new-seller-lead') showModal(`<div class="modal-head"><div><div class="eyebrow">CRM</div><h2>Novo lead</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="seller-lead-form"><div class="modal-body stack"><div class="field"><label>Negócio</label><input class="input" name="business_name" required></div><div class="form-grid"><div class="field"><label>Contato</label><input class="input" name="contact_name"></div><div class="field"><label>WhatsApp</label><input class="input" name="phone"></div></div><div class="form-grid"><div class="field"><label>Cidade</label><input class="input" name="city"></div><div class="field"><label>Nicho</label><input class="input" name="niche"></div></div><div class="field"><label>Instagram</label><input class="input" name="instagram"></div><div class="field"><label>Observações</label><textarea class="input" name="notes" rows="3"></textarea></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar lead</button></div></form>`);
+    if(action==='new-seller-sale') showModal(`<div class="modal-head"><div><div class="eyebrow">Resultado</div><h2>Registrar venda</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="seller-sale-form"><div class="modal-body stack"><div class="field"><label>Cliente / estabelecimento</label><input class="input" name="customer_name" required></div><div class="form-grid"><div class="field"><label>Valor da venda (R$)</label><input class="input" name="amount" inputmode="decimal" placeholder="499,90" required></div><div class="field"><label>Status</label><select class="select" name="status"><option value="pending">Pendente</option><option value="paid">Pago</option></select></div></div><div class="field"><label>Observação</label><textarea class="input" name="notes" rows="3"></textarea></div><div class="activation-notice">Sua comissão será calculada automaticamente usando a taxa definida pela administração.</div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Registrar</button></div></form>`);
+    if(action==='new-seller') showModal(`<div class="modal-head"><div><div class="eyebrow">Equipe</div><h2>Vincular vendedor</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="admin-seller-form"><div class="modal-body stack"><div class="activation-notice">A conta precisa existir primeiro em Supabase Auth → Users. Depois vincule pelo mesmo e-mail.</div><div class="field"><label>Nome</label><input class="input" name="full_name" required></div><div class="field"><label>E-mail da conta</label><input class="input" type="email" name="email" required></div><div class="form-grid"><div class="field"><label>WhatsApp</label><input class="input" name="phone"></div><div class="field"><label>Comissão (%)</label><input class="input" type="number" min="0" max="100" step="0.01" name="commission_rate" value="30" required></div></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Vincular vendedor</button></div></form>`);
+    if(action==='approve-sale' && state.role==='admin'){try{await apiFetch('/api/admin/sellers',{method:'PATCH',body:{kind:'sale-status',sale_id:actionEl.dataset.id,status:'paid'}});await loadSellersAdmin();toast('Venda aprovada','A comissão agora entra nos resultados pagos.');render();}catch(err){toast('Não foi possível aprovar',err.message);}}
+    if(action==='toggle-seller' && state.role==='admin'){ try{await apiFetch('/api/admin/sellers',{method:'PATCH',body:{id:actionEl.dataset.id,active:actionEl.dataset.active!=='1'}});await loadSellersAdmin();toast('Vendedor atualizado');render();}catch(err){toast('Não foi possível atualizar',err.message);} }
     if(action==='copy-sales-script'){ const item=PLAYBOOK.scripts.find(x=>x.id===actionEl.dataset.scriptId); if(item) copyText(item.text); }
     if(action==='copy-objection'){ const item=PLAYBOOK.objections.find(x=>x.id===actionEl.dataset.objectionId); if(item) copyText(item.answer); }
     if(action==='sales-routine'){ copyText((PLAYBOOK.routine||[]).map((x,i)=>`${i+1}. ${x}`).join('\n')); }
@@ -844,7 +895,7 @@
       try { await apiFetch(`/api/admin/plate?code=${encodeURIComponent(code)}`,{method:'DELETE',body:{confirmCode}}); state.plaques=state.plaques.filter(x=>x.code!==code); closeModal(); toast('Plaquinha excluída',`${code} foi removida do sistema.`); go('plaques'); }
       catch(err){ toast('Não foi possível excluir',err.message); actionEl.disabled=false; } finally { state.busy=false; }
     }
-    if(action==='activation-home'){ go(state.role==='admin'?'dashboard':state.role==='client'?'portal':'login'); }
+    if(action==='activation-home'){ go(state.role==='admin'?'dashboard':state.role==='seller'?'seller-dashboard':state.role==='client'?'portal':'login'); }
     if(action==='activation-retry'){ state.activation.loaded=false;state.activation.error='';state.activation.plate=null;render(); }
     if(action==='activation-account-mode'){ state.activation.accountMode=actionEl.dataset.mode==='existing'?'existing':'signup';render(); }
     if(action==='activation-choice'){
@@ -888,7 +939,7 @@
           const session=await apiFetch('/api/auth/me');
           state.user=session.user||state.user;
           state.sessionRole=session.role||state.sessionRole;
-          if(session.role==='admin'||session.role==='client'){state.role=session.role;await refreshRoleData();}
+          if(session.role==='admin'||session.role==='client'||session.role==='seller'){state.role=session.role;await refreshRoleData();}
         }
         toast('Plaquinha ativada','O QR Code já está direcionando para o destino escolhido.');
         render();
@@ -899,11 +950,11 @@
         render();
       } finally { state.busy=false; }
     }
-    if(action==='activation-finish'){ go(state.role==='admin'?'dashboard':state.role==='client'?'portal':'login'); }
+    if(action==='activation-finish'){ go(state.role==='admin'?'dashboard':state.role==='seller'?'seller-dashboard':state.role==='client'?'portal':'login'); }
   });
 
   document.addEventListener('submit', async (e) => {
-    if(e.target.id==='login-form') { e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target); try{ const out=await apiFetch('/api/auth/login',{method:'POST',body:{email:fd.get('email'),password:fd.get('password')}}); state.role=out.role;state.sessionRole=out.role;state.user=out.user||null;await refreshRoleData(); const after=sessionStorage.getItem('tajoTapAfterLogin');sessionStorage.removeItem('tajoTapAfterLogin'); if(after) go(after); else go(state.role==='admin'?'dashboard':'portal'); }catch(err){toast('Não foi possível entrar',err.message);} }
+    if(e.target.id==='login-form') { e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target); try{ const out=await apiFetch('/api/auth/login',{method:'POST',body:{email:fd.get('email'),password:fd.get('password')}}); state.role=out.role;state.sessionRole=out.role;state.user=out.user||null;await refreshRoleData(); const after=sessionStorage.getItem('tajoTapAfterLogin');sessionStorage.removeItem('tajoTapAfterLogin'); if(after) go(after); else go(state.role==='admin'?'dashboard':state.role==='seller'?'seller-dashboard':'portal'); }catch(err){toast('Não foi possível entrar',err.message);} }
     if(e.target.id==='activation-existing-login-form'){
       e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target);
       state.activation.email=String(fd.get('email')||'').trim().toLowerCase();
@@ -913,7 +964,7 @@
       try {
         const out=await apiFetch('/api/public/activation-login',{method:'POST',body:{email:state.activation.email,password:fd.get('password')}});
         state.user=out.user||null;state.sessionRole=out.role||'unassigned';
-        if(out.role==='admin'||out.role==='client'){state.role=out.role;await refreshRoleData();}
+        if(out.role==='admin'||out.role==='client'||out.role==='seller'){state.role=out.role;await refreshRoleData();}
         toast('Conta conectada','Agora você pode continuar a ativação.');render();
       } catch(err){toast('Não foi possível entrar',err.message);}
     }
@@ -928,6 +979,10 @@
       try { const out=await apiFetch('/api/admin/clients',{method:'POST',body:{name:fd.get('name'),contact:fd.get('contact'),phone:fd.get('phone'),city:fd.get('city')}}); state.clients.unshift(out.client); closeModal(); toast('Cliente cadastrado',out.client.name); render(); }
       catch(err){ toast('Não foi possível cadastrar',err.message); }
     }
+    if(e.target.id==='seller-lead-form'){e.preventDefault();if(!e.target.reportValidity())return;const fd=new FormData(e.target);try{await apiFetch('/api/seller/hub',{method:'POST',body:{kind:'lead',business_name:fd.get('business_name'),contact_name:fd.get('contact_name'),phone:fd.get('phone'),city:fd.get('city'),niche:fd.get('niche'),instagram:fd.get('instagram'),notes:fd.get('notes')}});await loadSellerData();closeModal();toast('Lead salvo');render();}catch(err){toast('Não foi possível salvar',err.message);} }
+    if(e.target.id==='seller-sale-form'){e.preventDefault();if(!e.target.reportValidity())return;const fd=new FormData(e.target);const amount=Number(String(fd.get('amount')||'').replace(/\./g,'').replace(',','.'));try{await apiFetch('/api/seller/hub',{method:'POST',body:{kind:'sale',customer_name:fd.get('customer_name'),amount,status:fd.get('status'),notes:fd.get('notes')}});await loadSellerData();closeModal();toast('Venda registrada');render();}catch(err){toast('Não foi possível registrar',err.message);} }
+    if(e.target.id==='admin-seller-form'){e.preventDefault();if(!e.target.reportValidity())return;const fd=new FormData(e.target);try{await apiFetch('/api/admin/sellers',{method:'POST',body:{full_name:fd.get('full_name'),email:fd.get('email'),phone:fd.get('phone'),commission_rate:fd.get('commission_rate')}});await loadSellersAdmin();closeModal();toast('Vendedor vinculado');render();}catch(err){toast('Não foi possível vincular',err.message);} }
+    if(e.target.id==='team-chat-form'){e.preventDefault();if(!e.target.reportValidity())return;const fd=new FormData(e.target);try{await apiFetch('/api/seller/chat',{method:'POST',body:{body:fd.get('body')}});e.target.reset();await refreshChat();}catch(err){toast('Não foi possível enviar',err.message);} }
     if(e.target.id==='destination-form'){
       e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target), p=state.plaques.find(x=>x.code===e.target.dataset.code); if(!p) return;
       try { const endpoint=state.role==='admin'?'/api/admin/destination':'/api/client/destination'; const out=await apiFetch(endpoint,{method:'POST',body:{code:p.code,type:fd.get('type'),url:fd.get('destination')}}); Object.assign(p,out.plate); closeModal();toast('Destino atualizado','A plaquinha física continua a mesma.');render(); }
@@ -935,7 +990,8 @@
     }
   });
 
-  document.addEventListener('change',(e)=>{
+  document.addEventListener('change',async(e)=>{
+    if(e.target.classList.contains('seller-lead-status')){try{await apiFetch('/api/seller/hub',{method:'PATCH',body:{kind:'lead',id:e.target.dataset.id,status:e.target.value}});await loadSellerData();toast('Lead atualizado');}catch(err){toast('Não foi possível atualizar',err.message);}return;}
     if(e.target.id==='qr-image-input' && e.target.files?.[0]) scanImage(e.target.files[0]);
   });
 

@@ -1,8 +1,16 @@
-# TAJO TAP Full Stack V3.4
+# TAJO TAP V4
+
+Sistema QR/NFC dinâmico com administração, clientes, ativação única, módulo comercial de vendedores e chat interno persistente.
+
+**Sistema desenvolvido por João Paulo Brandão.**
+
+Veja `V4-INSTALACAO.md` e `CHANGELOG-V4.md`.
+
+# TAJO TAP Full Stack V4
 
 Esta versão evolui a V3.3.1 sem exigir nova migration no banco para os recursos de interface. Mantém o fluxo `/atv/TT-XXXXXX` e adiciona recursos operacionais solicitados para uso real do painel.
 
-## Novidades V3.4
+## Novidades V4
 
 - botão **Sair da conta** visível no menu lateral e em Configurações;
 - exclusão administrativa de plaquinhas com confirmação digitando o código;
@@ -17,7 +25,7 @@ Esta versão evolui a V3.3.1 sem exigir nova migration no banco para os recursos
 
 ## Atualização
 
-Se a V3.3.1 já está publicada e a migration `002_plate_activation_flow.sql` já foi aplicada, **não é necessário executar uma nova migration para estes recursos**. Publique os arquivos da V3.4 no mesmo projeto Vercel e faça um novo deploy.
+Se a V3.3.1 já está publicada e a migration `002_plate_activation_flow.sql` já foi aplicada, **não é necessário executar uma nova migration para estes recursos**. Publique os arquivos da V4 no mesmo projeto Vercel e faça um novo deploy.
 
 ---
 
@@ -134,5 +142,5 @@ A V3.3.1 usa uma única migration incremental: `supabase/migrations/002_plate_ac
 ## V3.3.1 — correção migration 42P13
 
 A migration 002 agora remove e recria explicitamente as RPCs de ativação antes de defini-las. Isso corrige o erro PostgreSQL `42P13: cannot change return type of existing function` em bancos onde uma versão anterior da função já existia. A view administrativa também preserva as colunas antigas na mesma ordem e adiciona os novos campos somente no final.
-## V3.4.1 — Vercel Hobby
+## V4 — Vercel Hobby
 Esta versão consolida a API em uma única Vercel Function (`api/index.js`). Os módulos em `server/` são código interno importado pela função e não criam funções serverless separadas. As rotas públicas existentes continuam iguais por meio de `vercel.json`. Não há nova migration de banco para esta correção.

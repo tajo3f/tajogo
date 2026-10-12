@@ -12,6 +12,9 @@ import publicActivationLogin from '../server/public/activation-login.js';
 import publicPlate from '../server/public/plate.js';
 import resolvePlate from '../server/resolve.js';
 import health from '../server/health.js';
+import sellerHub from '../server/seller/hub.js';
+import sellerChat from '../server/seller/chat.js';
+import adminSellers from '../server/admin/sellers.js';
 
 const ROUTES = new Map([
   ['auth/login', authLogin],
@@ -27,7 +30,10 @@ const ROUTES = new Map([
   ['public/activation-login', publicActivationLogin],
   ['public/plate', publicPlate],
   ['resolve', resolvePlate],
-  ['health', health]
+  ['health', health],
+  ['seller/hub', sellerHub],
+  ['seller/chat', sellerChat],
+  ['admin/sellers', adminSellers]
 ]);
 
 function routeName(value) {
