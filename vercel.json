@@ -19,6 +19,7 @@
     { "source": "/api/admin/sellers", "destination": "/api/index?route=admin/sellers" },
     { "source": "/api/admin/batches", "destination": "/api/index?route=admin/batches" },
     { "source": "/api/admin/plates/bulk-delete", "destination": "/api/index?route=admin/plates/bulk-delete" },
+    { "source": "/api/admin/operations", "destination": "/api/index?route=admin/operations" },
     { "source": "/api/resolve", "destination": "/api/index?route=resolve" },
     { "source": "/atv/:code", "destination": "/index.html" },
     { "source": "/q/:code", "destination": "/api/index?route=resolve&code=:code&source=qr" },

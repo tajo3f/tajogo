@@ -79,6 +79,8 @@ export default async function handler(req, res) {
       name,
       client_id: clientId,
       status: 'unconfigured',
+      production_status: 'generated',
+      production_status_updated_at: new Date().toISOString(),
       created_by: auth.user.id
     }, requestedCode);
 

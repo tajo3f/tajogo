@@ -371,6 +371,8 @@ export default async function handler(req, res) {
         claimed_at: nowIso,
         current_destination_id: destinationId,
         status: 'active',
+        production_status: 'activated',
+        production_status_updated_at: nowIso,
         activated_at: plate.activated_at || nowIso,
         updated_at: nowIso
       });
