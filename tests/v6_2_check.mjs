@@ -1,0 +1,15 @@
+import fs from 'node:fs';
+const activate=fs.readFileSync(new URL('../server/public/activate.js',import.meta.url),'utf8');
+const app=fs.readFileSync(new URL('../assets/js/app.js',import.meta.url),'utf8');
+const seller=fs.readFileSync(new URL('../server/seller/hub.js',import.meta.url),'utf8');
+const migration=fs.readFileSync(new URL('../supabase/migrations/009_v6_2_purchase_email_binding.sql',import.meta.url),'utf8');
+const must=(ok,msg)=>{if(!ok)throw new Error(msg)};
+must(activate.includes('getAccessReservation'), 'reservation lookup missing');
+must(activate.includes('emailMasked'), 'masked purchase email missing');
+must(activate.includes('claimAccessReservation'), 'invite claim missing');
+must(activate.includes("REST_V6_2") || activate.includes("REST_V7"), 'V6.2+ engine marker missing');
+must(app.includes('activation-switch-account'), 'switch-account UX missing');
+must(app.includes('Compra vinculada por e-mail'), 'purchase email UX missing');
+must(seller.includes('plate_id=eq.'), 'seller invite not plate-scoped');
+must(migration.includes('tap_client_access_invites_one_pending_per_plate'), 'migration index missing');
+console.log('V6.2 purchase-email binding: OK');

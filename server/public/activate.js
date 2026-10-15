@@ -3,13 +3,16 @@ import { allowMethods, apiError, readJson, safePlateCode, setNoStore, text } fro
 import { currentUser, setSessionCookies } from '../_auth.js';
 import { publicErrorCode, supabaseAuth, supabaseAuthAdmin, supabaseRest } from '../_supabase.js';
 import { smartUrl, uniqueSlug, slugify } from '../_smart.js';
+import { assertWifiEncryptionReady, normalizeWifiConfig, upsertWifiProfile } from '../_wifi.js';
 
-const TYPES = new Set(['google', 'whatsapp', 'instagram', 'smart', 'map', 'custom']);
+const TYPES = new Set(['google', 'whatsapp', 'instagram', 'smart', 'wifi', 'hybrid', 'map', 'custom']);
 const LABELS = {
   google: 'Avaliações Google',
   whatsapp: 'WhatsApp',
   instagram: 'Instagram',
   smart: 'TAJO Smart Page',
+  wifi: 'Wi-Fi Connect',
+  hybrid: 'Smart Page + Wi-Fi',
   map: 'Localização',
   custom: 'Link personalizado'
 };
@@ -62,6 +65,48 @@ async function getActivation(plateId) {
     `tap_plate_activation_codes?plate_id=eq.${encodeURIComponent(plateId)}&select=plate_id,code_hash,consumed_at,expires_at,failed_attempts,last_failed_at,locked_until&limit=1`
   );
   return rows?.[0] || null;
+}
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function maskEmail(value) {
+  const email = normalizeEmail(value);
+  const [local, domain] = email.split('@');
+  if (!local || !domain) return '';
+  const visible = local.slice(0, 1);
+  return `${visible}${'*'.repeat(Math.max(3, Math.min(8, local.length - 1)))}@${domain}`;
+}
+
+async function getAccessReservation(plate) {
+  const inviteRows = await supabaseRest(
+    `tap_client_access_invites?plate_id=eq.${encodeURIComponent(plate.id)}&status=eq.pending&select=id,client_id,plate_id,seller_id,email,status,created_at&order=created_at.desc&limit=1`
+  ).catch(() => []);
+  const invite = inviteRows?.[0] || null;
+  if (invite?.email) {
+    return { source: 'invite', id: invite.id, clientId: invite.client_id || plate.client_id || null, email: normalizeEmail(invite.email) };
+  }
+
+  if (plate.client_id) {
+    const clientRows = await supabaseRest(
+      `tap_clients?id=eq.${encodeURIComponent(plate.client_id)}&select=id,email&limit=1`
+    ).catch(() => []);
+    const client = clientRows?.[0] || null;
+    if (client?.email) {
+      return { source: 'client', id: null, clientId: client.id, email: normalizeEmail(client.email) };
+    }
+  }
+  return null;
+}
+
+async function claimAccessReservation(reservation, userId) {
+  if (!reservation?.id) return;
+  await supabaseRest(`tap_client_access_invites?id=eq.${encodeURIComponent(reservation.id)}&status=eq.pending`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ status: 'claimed', claimed_at: new Date().toISOString(), claimed_by: userId })
+  }).catch(() => null);
 }
 
 async function updateActivation(plateId, patch) {
@@ -304,9 +349,20 @@ export default async function handler(req, res) {
       const available = !configured && ['inventory', 'unconfigured'].includes(plate.status);
       const smartRows = await supabaseRest(`tap_smart_pages?plate_id=eq.${encodeURIComponent(plate.id)}&is_published=eq.true&select=id,slug,business_name&limit=1`).catch(() => []);
       const smartPage = smartRows?.[0] || null;
+      let wifiMode = 'off';
+      if (smartPage?.id) {
+        const wifiRows = await supabaseRest(`tap_wifi_profiles?smart_page_id=eq.${encodeURIComponent(smartPage.id)}&select=mode&limit=1`).catch(() => []);
+        wifiMode = wifiRows?.[0]?.mode || 'off';
+      }
+      const reservation = await getAccessReservation(plate);
+      let sessionMatchesPurchaseEmail = null;
+      if (reservation?.email) {
+        const sessionUser = await currentUser(req, res).catch(() => null);
+        if (sessionUser?.email) sessionMatchesPurchaseEmail = normalizeEmail(sessionUser.email) === reservation.email;
+      }
       return res.status(200).json({
         ok: true,
-        activationEngine: 'REST_V6_1',
+        activationEngine: 'REST_V7',
         plate: {
           code: plate.code,
           name: plate.name,
@@ -316,8 +372,14 @@ export default async function handler(req, res) {
           configured,
           available,
           configuredAt: plate.configured_at || null,
-          smartPage: smartPage ? { id: smartPage.id, slug: smartPage.slug, businessName: smartPage.business_name, url: smartUrl(req, smartPage.slug) } : null
-        }
+          smartPage: smartPage ? { id: smartPage.id, slug: smartPage.slug, businessName: smartPage.business_name, url: smartUrl(req, smartPage.slug), wifiMode } : null
+        },
+        access: reservation?.email ? {
+          restricted: true,
+          emailMasked: maskEmail(reservation.email),
+          source: reservation.source,
+          sessionMatchesPurchaseEmail
+        } : { restricted: false, emailMasked: null, source: null, sessionMatchesPurchaseEmail: null }
       });
     }
 
@@ -332,16 +394,37 @@ export default async function handler(req, res) {
     const email = text(body?.email, 320).toLowerCase();
     const password = String(body?.password || '');
     const type = text(body?.type, 30);
+    const smartExperience = ['smart', 'wifi', 'hybrid'].includes(type);
     const smartBusinessName = text(body?.smartBusinessName, 120) || companyName;
     const requestedSmartSlug = slugify(body?.smartSlug || smartBusinessName || companyName);
-    const url = type === 'smart' ? null : validHttps(body?.url);
+    const url = smartExperience ? null : validHttps(body?.url);
+    let wifiConfig = null;
 
     if (!code) return apiError(res, 400, 'CODE_INVALID', 'Código de plaquinha inválido.');
     if (!/^\d{6}$/.test(pin)) return apiError(res, 400, 'PIN_INVALID', 'Informe os seis números do código de ativação.');
     if (!TYPES.has(type)) return apiError(res, 400, 'TYPE_INVALID', 'Selecione um tipo de destino válido.');
-    if (type !== 'smart' && !url) return apiError(res, 400, 'URL_INVALID', 'Informe um link HTTPS válido.');
-    if (type === 'smart' && smartBusinessName.length < 2) return apiError(res, 400, 'COMPANY_REQUIRED', 'Informe o nome da Smart Page.');
+    if (!smartExperience && !url) return apiError(res, 400, 'URL_INVALID', 'Informe um link HTTPS válido.');
+    if (smartExperience && smartBusinessName.length < 2) return apiError(res, 400, 'COMPANY_REQUIRED', 'Informe o nome da Smart Page.');
     if (companyName.length < 2) return apiError(res, 400, 'COMPANY_REQUIRED', 'Informe o nome do estabelecimento.');
+    if (type === 'wifi' || type === 'hybrid') {
+      try {
+        assertWifiEncryptionReady();
+        wifiConfig = normalizeWifiConfig({
+          wifiMode: type,
+          wifiSsid: body?.wifiSsid,
+          wifiSecurity: body?.wifiSecurity,
+          wifiPassword: body?.wifiPassword,
+          wifiHidden: body?.wifiHidden,
+          wifiPublicEnabled: true,
+          wifiDirectQrEnabled: true,
+          wifiLabel: body?.wifiLabel
+        });
+      } catch (wifiError) {
+        if (wifiError?.code === 'WIFI_SSID_INVALID') return apiError(res, 400, 'WIFI_SSID_INVALID', 'Informe o nome da rede Wi-Fi.');
+        if (wifiError?.code === 'WIFI_PASSWORD_INVALID') return apiError(res, 400, 'WIFI_PASSWORD_INVALID', 'Use uma senha compatível com o tipo de segurança escolhido. Para WPA/WPA2/WPA3, use 8 a 63 caracteres.');
+        throw wifiError;
+      }
+    }
 
     // V4.4: validação direta via REST server-side. Não depende do cache de RPC do PostgREST.
     stage = 'pin_validation_rest';
@@ -349,6 +432,11 @@ export default async function handler(req, res) {
     if (!plate) return activationError(res, 'PLATE_NOT_FOUND');
     const pinCheck = await validatePin(plate, pin);
     if (!pinCheck.ok) return activationError(res, pinCheck.code, pinCheck.retryAfter || null);
+
+    const accessReservation = await getAccessReservation(plate);
+    if (mode !== 'existing' && accessReservation?.email && normalizeEmail(email) !== accessReservation.email) {
+      return activationError(res, 'EMAIL_MISMATCH');
+    }
 
     let user = null;
     let sessionReady = false;
@@ -389,7 +477,12 @@ export default async function handler(req, res) {
       }
     }
 
-    stage = 'activate_rest_v6_1';
+    if (accessReservation?.email && normalizeEmail(user?.email || email) !== accessReservation.email) {
+      if (createdNewUser && createdUserId) await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
+      return activationError(res, 'EMAIL_MISMATCH');
+    }
+
+    stage = 'activate_rest_v7';
     // Releitura antes do claim reduz a janela de concorrência.
     plate = await getPlate(code);
     if (!plate) throw Object.assign(new Error('PLATE_NOT_FOUND'), { activationCode: 'PLATE_NOT_FOUND' });
@@ -405,12 +498,12 @@ export default async function handler(req, res) {
       return activationError(res, finalPinCheck.code, finalPinCheck.retryAfter || null);
     }
 
-    const accountEmail = String(user.email || email || '').toLowerCase();
+    const accountEmail = normalizeEmail(user.email || email || '');
     const accountName = text(fullName || user.user_metadata?.full_name || accountEmail?.split('@')[0] || 'Cliente', 120);
     const accountPhone = text(phone || user.user_metadata?.phone || '', 40);
     const nowIso = new Date().toISOString();
 
-    let clientId = plate.client_id || null;
+    let clientId = accessReservation?.clientId || plate.client_id || null;
     let createdClientId = null;
     let membershipCreated = false;
     let destinationId = null;
@@ -421,9 +514,9 @@ export default async function handler(req, res) {
     let claimSucceeded = false;
 
     try {
-      if (clientId) {
+      if (clientId && !accessReservation?.email) {
         const assignedRows = await supabaseRest(`tap_clients?id=eq.${encodeURIComponent(clientId)}&select=id,email&limit=1`);
-        const assignedEmail = String(assignedRows?.[0]?.email || '').trim().toLowerCase();
+        const assignedEmail = normalizeEmail(assignedRows?.[0]?.email || '');
         if (assignedEmail && assignedEmail !== accountEmail) {
           if (createdNewUser && createdUserId) await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
           return activationError(res, 'EMAIL_MISMATCH');
@@ -443,7 +536,7 @@ export default async function handler(req, res) {
       const member = await ensureMembership(clientId, user.id);
       membershipCreated = Boolean(member.created);
 
-      if (type === 'smart') {
+      if (smartExperience) {
         const smart = await createSmartPage({
           req,
           plate,
@@ -458,7 +551,8 @@ export default async function handler(req, res) {
         destinationUrl = smartUrl(req, smart.page.slug);
       }
 
-      const destination = await createDestination(plate.id, type, destinationUrl, LABELS[type], user.id);
+      const destinationType = smartExperience ? 'smart' : type;
+      const destination = await createDestination(plate.id, destinationType, destinationUrl, LABELS[type], user.id);
       if (!destination?.id) throw new Error('DESTINATION_CREATE_FAILED');
       destinationId = destination.id;
 
@@ -496,18 +590,32 @@ export default async function handler(req, res) {
         last_failed_at: null,
         locked_until: null
       }).catch((postClaimError) => {
-        console.error('[public/activate:v6.1:pin-consume]', { plateId: plate.id, detail: postClaimError?.detail || postClaimError?.message });
+        console.error('[public/activate:v7:pin-consume]', { plateId: plate.id, detail: postClaimError?.detail || postClaimError?.message });
       });
+
+      await claimAccessReservation(accessReservation, user.id);
+
+      let wifi = null;
+      if ((type === 'wifi' || type === 'hybrid') && smartPageId && wifiConfig) {
+        try {
+          wifi = await upsertWifiProfile({ plateId: plate.id, smartPageId, userId: user.id, config: wifiConfig });
+          await supabaseRest(`tap_smart_pages?id=eq.${encodeURIComponent(smartPageId)}`, {
+            method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ wifi_name: null, wifi_password: null })
+          }).catch(() => null);
+        } catch (wifiError) {
+          console.error('[public/activate:v7:wifi]', { plateId: plate.id, code: wifiError?.code, detail: wifiError?.detail || wifiError?.message });
+        }
+      }
 
       await supabaseRest('tap_audit_logs', {
         method: 'POST',
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({
           actor_user_id: user.id,
-          action: 'plate.self_activation.complete.v6_1',
+          action: 'plate.self_activation.complete.v7',
           entity_type: 'plate',
           entity_id: plate.id,
-          metadata: { client_id: clientId, destination_id: destinationId, smart_page_id: smartPageId, type, source: 'atv', engine: 'rest_v6_1' }
+          metadata: { client_id: clientId, destination_id: destinationId, smart_page_id: smartPageId, type, wifi_mode: wifi?.mode || 'off', source: 'atv', engine: 'rest_v7' }
         })
       }).catch(() => null);
 
@@ -516,7 +624,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true,
         activated: true,
-        activationEngine: 'REST_V6_1',
+        activationEngine: 'REST_V7',
         code,
         sessionReady,
         emailConfirmationRequired: mode === 'signup' && !sessionReady,
@@ -524,6 +632,7 @@ export default async function handler(req, res) {
         clientId,
         destinationUrl,
         smartPage: smartPage ? { id: smartPage.id, slug: smartPage.slug, businessName: smartPage.business_name, url: smartUrl(req, smartPage.slug) } : null,
+        wifi: wifi ? { mode: wifi.mode, ssid: wifi.ssid, security: wifi.security, hidden: wifi.hidden, directQrEnabled: wifi.directQrEnabled, payload: wifi.directQrEnabled ? wifi.payload : '' } : null,
         configuredAt: nowIso
       });
     } catch (innerError) {
@@ -535,10 +644,14 @@ export default async function handler(req, res) {
   } catch (error) {
     const code = publicErrorCode(error);
     const reference = activationReference();
-    console.error('[public/activate:v6.1]', { reference, stage, code, status: error?.status, detail: error?.detail || error?.message });
+    console.error('[public/activate:v7]', { reference, stage, code, status: error?.status, detail: error?.detail || error?.message });
 
-    if (createdNewUser && createdUserId && stage === 'activate_rest_v6_1') {
+    if (createdNewUser && createdUserId && stage === 'activate_rest_v7') {
       await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
+    }
+
+    if (code === 'WIFI_ENCRYPTION_KEY_MISSING') {
+      return res.status(503).json({ ok:false, error:code, message:'O Wi-Fi Connect ainda não foi habilitado no servidor. Configure TAJO_WIFI_ENCRYPTION_KEY na Vercel.', reference });
     }
 
     return res.status(503).json({

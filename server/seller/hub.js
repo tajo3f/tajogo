@@ -70,12 +70,13 @@ async function findOrCreateClient({customerName,email,userId}){
 }
 
 async function ensureInvite({clientId,plateId,sellerId,email}){
-  const found=await supabaseRest(`tap_client_access_invites?client_id=eq.${encodeURIComponent(clientId)}&email=eq.${encodeURIComponent(email)}&select=id,status&limit=1`).catch(()=>[]);
+  const normalized=normalizeEmail(email);
+  const found=await supabaseRest(`tap_client_access_invites?plate_id=eq.${encodeURIComponent(plateId)}&status=eq.pending&select=id,status&limit=1`).catch(()=>[]);
   if(found?.[0]){
-    await supabaseRest(`tap_client_access_invites?id=eq.${encodeURIComponent(found[0].id)}`,{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({plate_id:plateId,seller_id:sellerId,status:'pending',claimed_at:null,claimed_by:null})}).catch(()=>null);
+    await supabaseRest(`tap_client_access_invites?id=eq.${encodeURIComponent(found[0].id)}`,{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({client_id:clientId,seller_id:sellerId,email:normalized,status:'pending',claimed_at:null,claimed_by:null})}).catch(()=>null);
     return found[0].id;
   }
-  const rows=await supabaseRest('tap_client_access_invites?select=id',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify({client_id:clientId,plate_id:plateId,seller_id:sellerId,email,status:'pending'})});
+  const rows=await supabaseRest('tap_client_access_invites?select=id',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify({client_id:clientId,plate_id:plateId,seller_id:sellerId,email:normalized,status:'pending'})});
   return rows?.[0]?.id||null;
 }
 

@@ -10,7 +10,7 @@ const legacyHotfixStillValid = [
   migration.includes("notify pgrst, 'reload schema'")
 ].every(Boolean);
 if (!legacyHotfixStillValid) throw new Error('V4.3 migration compatibility failed');
-if (!((activate.includes('REST_V4_4') || activate.includes('REST_V6_1')) || activate.includes('ACTIVATION_RPC_NOT_AVAILABLE'))) {
+if (!((activate.includes('REST_V4_4') || activate.includes('REST_V6_1') || activate.includes('REST_V6_2') || activate.includes('REST_V7')) || activate.includes('ACTIVATION_RPC_NOT_AVAILABLE'))) {
   throw new Error('V4.3/V4.4 activation compatibility failed');
 }
 console.log('V4.3 compatibility check: OK (superseded by V4.4 engine when present)');

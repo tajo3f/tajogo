@@ -8,7 +8,7 @@ export default async function handler(_req, res) {
       supabaseRest('tap_plates?select=id&limit=1', { method: 'GET' }),
       supabaseAuth('settings', { method: 'GET' })
     ]);
-    return res.status(200).json({ ok: true, service: 'tajo-tap-backend', database: 'connected', auth: 'connected', runtime: process.version });
+    return res.status(200).json({ ok: true, service: 'tajo-tap-backend', database: 'connected', auth: 'connected', wifiConnect: String(process.env.TAJO_WIFI_ENCRYPTION_KEY || '').trim().length >= 32 ? 'ready' : 'config_required', runtime: process.version });
   } catch (error) {
     console.error('[TAJO TAP health] failed', { errorCode: error?.code, status: error?.status, detail: error?.detail });
     return res.status(503).json({ ok: false, service: 'tajo-tap-backend', error: publicErrorCode(error), runtime: process.version });

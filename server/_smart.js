@@ -126,7 +126,7 @@ export async function canEditSmartPage(role, page) {
 export function smartPagePatch(body = {}) {
   const patch = {};
   const setText = (key, n = 240) => { if (body[key] !== undefined) patch[key] = clean(body[key], n) || null; };
-  ['subtitle','bio','logo_url','cover_url','whatsapp','phone','public_email','instagram','tiktok','pix_key','wifi_name','wifi_password','address','opening_hours'].forEach((k) => setText(k, k === 'bio' ? 1200 : k === 'opening_hours' ? 800 : 320));
+  ['subtitle','bio','logo_url','cover_url','whatsapp','phone','public_email','instagram','tiktok','pix_key','address','opening_hours'].forEach((k) => setText(k, k === 'bio' ? 1200 : k === 'opening_hours' ? 800 : 320));
   if (body.business_name !== undefined) {
     const v = clean(body.business_name, 120);
     if (v.length >= 2) patch.business_name = v;

@@ -1,40 +1,82 @@
-# TAJO TAP V6
+# TAJO TAP V7.0 — Wi‑Fi Connect + Smart Page
 
-TAJO TAP é uma plataforma operacional para produção, distribuição e gestão de plaquinhas inteligentes com QR/NFC dinâmicos, ativação por PIN, vendedores, clientes, analytics e Smart Pages.
+TAJO TAP é a plataforma operacional da TAJO para produção, distribuição e gestão de plaquinhas inteligentes, com QR dinâmico, ativação por PIN, lotes, vendedores, clientes, analytics e Smart Pages.
 
-## V6
+**Sistema desenvolvido por João Paulo Brandão.**
 
-A V6 adiciona a **TAJO Smart Page**: um biosite comercial editável pelo cliente e pelo vendedor responsável, com URL pública no formato:
+## Novidades da V7.0
 
-```text
-https://go.tajodigital.com.br/bio/nome-do-negocio
+A V7 adiciona **Wi‑Fi Connect** de duas formas complementares:
+
+- **Smart Page + Wi‑Fi (recomendado):** o QR principal permanente da plaquinha continua apontando para `https://go.tajodigital.com.br/q/TT-XXXXXX`, abre a Smart Page e exibe os dados Wi‑Fi do negócio.
+- **QR Wi‑Fi direto:** o sistema gera um segundo QR com o padrão nativo `WIFI:...`. Ao escanear esse QR compatível, o próprio celular oferece a conexão à rede sem exigir digitação manual da senha.
+
+O segundo QR é propositalmente separado do QR principal. Um QR Wi‑Fi nativo contém SSID/senha no próprio código e, por isso, **não é dinâmico**. Se a rede ou senha mudar, gere novamente somente esse QR Wi‑Fi. O QR principal TAJO TAP continua permanente.
+
+## Segurança do Wi‑Fi
+
+Novas senhas Wi‑Fi não são gravadas em texto puro no banco. A V7 usa **AES‑256‑GCM** no backend e armazena somente ciphertext, IV e authentication tag em `public.tap_wifi_profiles`.
+
+Configure na Vercel, em Production:
+
+```env
+TAJO_WIFI_ENCRYPTION_KEY=<segredo forte com pelo menos 32 caracteres>
 ```
 
-O vendedor continua sem permissão para criar plaquinhas. Ele recebe lotes da administração, vende uma unidade, informa o e-mail do comprador e o sistema cria/vincula a Smart Page e o acesso do cliente.
+Gere uma chave aleatória, por exemplo:
+
+```bash
+openssl rand -hex 32
+```
+
+Não coloque essa chave no GitHub, frontend ou variável `NEXT_PUBLIC_*`. Guarde uma cópia segura: trocar/perder a chave impede a leitura das senhas já cifradas.
+
+Para estabelecimentos, prefira uma **rede de visitantes** separada da rede administrativa/PDV.
+
+## Banco Supabase
+
+Todas as migrations do backend estão em:
+
+```text
+supabase/migrations/
+```
+
+O pacote V7 contém as migrations `001` até `010`. Se o ambiente já está atualizado até a V6.2, execute **somente**:
+
+```text
+010_v7_wifi_connect.sql
+```
+
+Depois rode:
+
+```text
+supabase/VERIFY_V7.sql
+```
 
 ## Stack
 
 - HTML/CSS/JavaScript Vanilla
 - Vercel
 - Supabase Auth + PostgreSQL
-- Uma única Vercel Function (`/api/index.js`)
+- Uma única Vercel Function: `/api/index.js`
+- Node 24.x
+- Sem dependências npm de runtime
 
-## Atualização do banco
-
-Quem já está na V5 deve executar somente:
+## URLs principais
 
 ```text
-supabase/migrations/008_v6_smart_page_and_customer_access.sql
+QR dinâmico:  https://go.tajodigital.com.br/q/TT-XXXXXX
+NFC:          https://go.tajodigital.com.br/n/TT-XXXXXX
+Ativação:     https://go.tajodigital.com.br/atv/TT-XXXXXX
+Smart Page:   https://go.tajodigital.com.br/bio/nome-do-negocio
 ```
 
-Veja `V6-INSTALACAO.md`.
-
-## Testes
+## Testes locais
 
 ```bash
 npm test
 ```
 
-## Crédito
+A suíte valida sintaxe JS, assets, encoder QR, exposição de secrets, limite do Vercel Hobby, compatibilidade das versões anteriores, payload Wi‑Fi, migration V7 e integração estática Smart Page/Wi‑Fi.
 
-**Sistema desenvolvido por João Paulo Brandão**
+Consulte `V7-INSTALACAO.md` antes do deploy.

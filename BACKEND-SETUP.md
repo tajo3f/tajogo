@@ -299,3 +299,15 @@ Se seu projeto Supabase já possui `public.tap_profiles`, não apague a tabela. 
 # V3.3 — ativação única
 
 Depois da V3.2, execute `supabase/migrations/002_plate_self_activation.sql`. Não altere nem reaplique a `001` em produção. Em seguida publique o código V3.3. A rota limpa de ativação é `https://go.tajodigital.com.br/atv/TT-XXXXXX`.
+
+## V7.0 — variável adicional do Wi‑Fi Connect
+
+Além das variáveis existentes do Supabase e `PANEL_BASE_URL`, a V7 exige no backend Vercel:
+
+```env
+TAJO_WIFI_ENCRYPTION_KEY=<segredo forte e estável com pelo menos 32 caracteres>
+```
+
+Ela é usada somente pelo servidor para cifrar/decifrar a senha Wi‑Fi via AES‑256‑GCM. Nunca exponha essa variável no frontend ou GitHub.
+
+Depois de adicioná-la em Production, faça um novo deployment e confira `/api/health`. O campo `wifiConnect` deve ser `ready`.

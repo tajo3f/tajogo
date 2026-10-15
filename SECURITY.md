@@ -54,3 +54,15 @@ Não acessa o painel nem o banco. O visitante passa pela Vercel Function de redi
 - Clientes recebem apenas Smart Pages cujo `client_id` esteja em `tap_client_members` para seu usuário autenticado.
 - Tabelas de Smart Page e convites têm acesso direto de `anon` e `authenticated` revogado; operações passam pelo backend.
 - Analytics da Smart Page não armazena IP ou fingerprint.
+
+## V7 — Wi‑Fi Connect
+
+- novas credenciais Wi‑Fi são armazenadas em `tap_wifi_profiles`, não em texto puro;
+- o backend usa AES‑256‑GCM com IV aleatório e authentication tag;
+- a chave de cifra é `TAJO_WIFI_ENCRYPTION_KEY`, exclusiva do backend Vercel;
+- a tabela Wi‑Fi tem RLS habilitado e acesso direto de `anon`/`authenticated` revogado;
+- somente admin, cliente proprietário ou vendedor autorizado recebem configuração Wi‑Fi pela API autenticada;
+- a Smart Page pública só mostra Wi‑Fi quando `public_enabled=true`;
+- QR Wi‑Fi direto contém as credenciais necessárias à conexão e deve ser tratado como informação pública da rede de visitantes;
+- recomendamos rede guest separada da rede operacional/administrativa;
+- perder/trocar a chave de criptografia sem recifrar os registros existentes impede a leitura das senhas salvas.

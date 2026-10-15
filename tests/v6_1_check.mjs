@@ -12,7 +12,7 @@ const checks=[
   ['backend gera destino interno Smart Page', activate.includes('destinationUrl = smartUrl(req, smart.page.slug)')],
   ['Instagram aceita @ e monta URL', app.includes('https://instagram.com/${handle}')],
   ['Localização aceita endereço', app.includes('google.com/maps/search/?api=1&query=')],
-  ['motor V6.1 ativo', activate.includes("activationEngine: 'REST_V6_1'")],
+  ['motor Smart Page V6.1+ ativo', activate.includes("activationEngine: 'REST_V6_1'") || activate.includes("activationEngine: 'REST_V6_2'") || activate.includes("activationEngine: 'REST_V7'")],
   ['sem nova migration obrigatória', fs.existsSync(path.join(root,'supabase/migrations/008_v6_smart_page_and_customer_access.sql'))]
 ];
 let failed=0;
