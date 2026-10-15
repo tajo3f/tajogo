@@ -9,7 +9,7 @@ const vercel = read('vercel.json');
 const activation = read('server/public/activate.js');
 const migration = read('supabase/migrations/004_activation_v4_and_batches.sql');
 
-const activationEnginePresent = activation.includes('REST_V4_4') || (
+const activationEnginePresent = (activation.includes('REST_V4_4') || activation.includes('REST_V6_1')) || (
   activation.includes('tap_validate_activation_pin_v4') && activation.includes('tap_activate_plate_v4')
 );
 

@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { allowMethods, apiError, readJson, safePlateCode, setNoStore, text } from '../_http.js';
 import { currentUser, setSessionCookies } from '../_auth.js';
 import { publicErrorCode, supabaseAuth, supabaseAuthAdmin, supabaseRest } from '../_supabase.js';
-import { smartUrl } from '../_smart.js';
+import { smartUrl, uniqueSlug, slugify } from '../_smart.js';
 
 const TYPES = new Set(['google', 'whatsapp', 'instagram', 'smart', 'map', 'custom']);
 const LABELS = {
@@ -52,7 +52,7 @@ function activationError(res, code, retryAfter = null) {
 
 async function getPlate(code) {
   const rows = await supabaseRest(
-    `tap_plates?code=eq.${encodeURIComponent(code)}&select=id,code,name,status,client_id,owner_user_id,current_destination_id,setup_status,configuration_locked,configured_at,activated_at&limit=1`
+    `tap_plates?code=eq.${encodeURIComponent(code)}&select=id,code,name,status,client_id,seller_id,owner_user_id,current_destination_id,setup_status,configuration_locked,configured_at,activated_at&limit=1`
   );
   return rows?.[0] || null;
 }
@@ -166,6 +166,53 @@ async function ensureMembership(clientId, userId) {
   return { created: true };
 }
 
+async function getSmartPageForPlate(plateId) {
+  const rows = await supabaseRest(`tap_smart_pages?plate_id=eq.${encodeURIComponent(plateId)}&select=*&limit=1`).catch(() => []);
+  return rows?.[0] || null;
+}
+
+async function createSmartPage({ req, plate, clientId, businessName, requestedSlug, phone }) {
+  const existing = await getSmartPageForPlate(plate.id);
+  if (existing) {
+    const patch = {};
+    if (existing.client_id !== clientId) patch.client_id = clientId;
+    if (!existing.business_name && businessName) patch.business_name = businessName;
+    if (!existing.whatsapp && phone) patch.whatsapp = String(phone).replace(/\D/g, '').slice(0, 20) || null;
+    if (!existing.is_published) patch.is_published = true;
+    if (Object.keys(patch).length) {
+      const rows = await supabaseRest(`tap_smart_pages?id=eq.${encodeURIComponent(existing.id)}&select=*`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(patch)
+      });
+      return { page: rows?.[0] || { ...existing, ...patch }, created: false };
+    }
+    return { page: existing, created: false };
+  }
+
+  const slug = await uniqueSlug(requestedSlug || businessName);
+  const payload = {
+    client_id: clientId,
+    plate_id: plate.id,
+    created_by_seller_id: plate.seller_id || null,
+    slug,
+    business_name: String(businessName || 'Minha empresa').slice(0, 120),
+    subtitle: 'Sua empresa mais perto do cliente',
+    bio: 'Encontre nossos principais canais, localização e informações em um só lugar.',
+    whatsapp: String(phone || '').replace(/\D/g, '').slice(0, 20) || null,
+    seller_edit_allowed: true,
+    is_published: true
+  };
+  const rows = await supabaseRest('tap_smart_pages?select=*', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(payload)
+  });
+  const page = rows?.[0] || null;
+  if (!page?.id) throw new Error('SMART_PAGE_CREATE_FAILED');
+  return { page, created: true, url: smartUrl(req, page.slug) };
+}
+
 async function createDestination(plateId, type, url, label, userId) {
   const rows = await supabaseRest('tap_plate_destinations?select=id,plate_id,type,url', {
     method: 'POST',
@@ -200,9 +247,14 @@ async function claimPlate(plateId, patch) {
   return rows?.[0] || null;
 }
 
-async function cleanupFailedClaim({ destinationId, createdClientId, clientId, userId, membershipCreated }) {
+async function cleanupFailedClaim({ destinationId, smartPageId, smartPageCreated, createdClientId, clientId, userId, membershipCreated }) {
   if (destinationId) {
     await supabaseRest(`tap_plate_destinations?id=eq.${encodeURIComponent(destinationId)}`, {
+      method: 'DELETE', headers: { Prefer: 'return=minimal' }
+    }).catch(() => null);
+  }
+  if (smartPageCreated && smartPageId) {
+    await supabaseRest(`tap_smart_pages?id=eq.${encodeURIComponent(smartPageId)}`, {
       method: 'DELETE', headers: { Prefer: 'return=minimal' }
     }).catch(() => null);
   }
@@ -235,13 +287,26 @@ export default async function handler(req, res) {
       const plate = await getPlate(code);
       if (!plate) return apiError(res, 404, 'PLATE_NOT_FOUND', 'Plaquinha não encontrada.');
 
+      if (req.query?.checkSlug) {
+        const requested = slugify(req.query.checkSlug);
+        const rows = await supabaseRest(`tap_smart_pages?slug=eq.${encodeURIComponent(requested)}&select=id,plate_id&limit=1`).catch(() => []);
+        const occupied = rows?.[0] && rows[0].plate_id !== plate.id;
+        const suggested = occupied ? await uniqueSlug(requested) : requested;
+        return res.status(200).json({
+          ok: true,
+          slug: requested,
+          available: !occupied,
+          suggestedSlug: suggested
+        });
+      }
+
       const configured = Boolean(plate.configuration_locked || plate.setup_status === 'completed' || plate.status === 'active');
       const available = !configured && ['inventory', 'unconfigured'].includes(plate.status);
       const smartRows = await supabaseRest(`tap_smart_pages?plate_id=eq.${encodeURIComponent(plate.id)}&is_published=eq.true&select=id,slug,business_name&limit=1`).catch(() => []);
       const smartPage = smartRows?.[0] || null;
       return res.status(200).json({
         ok: true,
-        activationEngine: 'REST_V4_4',
+        activationEngine: 'REST_V6_1',
         plate: {
           code: plate.code,
           name: plate.name,
@@ -251,7 +316,7 @@ export default async function handler(req, res) {
           configured,
           available,
           configuredAt: plate.configured_at || null,
-          smartPage: smartPage ? { id: smartPage.id, businessName: smartPage.business_name, url: smartUrl(req, smartPage.slug) } : null
+          smartPage: smartPage ? { id: smartPage.id, slug: smartPage.slug, businessName: smartPage.business_name, url: smartUrl(req, smartPage.slug) } : null
         }
       });
     }
@@ -267,12 +332,15 @@ export default async function handler(req, res) {
     const email = text(body?.email, 320).toLowerCase();
     const password = String(body?.password || '');
     const type = text(body?.type, 30);
-    const url = validHttps(body?.url);
+    const smartBusinessName = text(body?.smartBusinessName, 120) || companyName;
+    const requestedSmartSlug = slugify(body?.smartSlug || smartBusinessName || companyName);
+    const url = type === 'smart' ? null : validHttps(body?.url);
 
     if (!code) return apiError(res, 400, 'CODE_INVALID', 'Código de plaquinha inválido.');
     if (!/^\d{6}$/.test(pin)) return apiError(res, 400, 'PIN_INVALID', 'Informe os seis números do código de ativação.');
     if (!TYPES.has(type)) return apiError(res, 400, 'TYPE_INVALID', 'Selecione um tipo de destino válido.');
-    if (!url) return apiError(res, 400, 'URL_INVALID', 'Informe um link HTTPS válido.');
+    if (type !== 'smart' && !url) return apiError(res, 400, 'URL_INVALID', 'Informe um link HTTPS válido.');
+    if (type === 'smart' && smartBusinessName.length < 2) return apiError(res, 400, 'COMPANY_REQUIRED', 'Informe o nome da Smart Page.');
     if (companyName.length < 2) return apiError(res, 400, 'COMPANY_REQUIRED', 'Informe o nome do estabelecimento.');
 
     // V4.4: validação direta via REST server-side. Não depende do cache de RPC do PostgREST.
@@ -321,7 +389,7 @@ export default async function handler(req, res) {
       }
     }
 
-    stage = 'activate_rest_v4_4';
+    stage = 'activate_rest_v6_1';
     // Releitura antes do claim reduz a janela de concorrência.
     plate = await getPlate(code);
     if (!plate) throw Object.assign(new Error('PLATE_NOT_FOUND'), { activationCode: 'PLATE_NOT_FOUND' });
@@ -346,6 +414,10 @@ export default async function handler(req, res) {
     let createdClientId = null;
     let membershipCreated = false;
     let destinationId = null;
+    let destinationUrl = url;
+    let smartPageId = null;
+    let smartPageCreated = false;
+    let smartPage = null;
     let claimSucceeded = false;
 
     try {
@@ -371,7 +443,22 @@ export default async function handler(req, res) {
       const member = await ensureMembership(clientId, user.id);
       membershipCreated = Boolean(member.created);
 
-      const destination = await createDestination(plate.id, type, url, LABELS[type], user.id);
+      if (type === 'smart') {
+        const smart = await createSmartPage({
+          req,
+          plate,
+          clientId,
+          businessName: smartBusinessName || companyName,
+          requestedSlug: requestedSmartSlug,
+          phone: accountPhone
+        });
+        smartPage = smart.page;
+        smartPageId = smart.page?.id || null;
+        smartPageCreated = Boolean(smart.created);
+        destinationUrl = smartUrl(req, smart.page.slug);
+      }
+
+      const destination = await createDestination(plate.id, type, destinationUrl, LABELS[type], user.id);
       if (!destination?.id) throw new Error('DESTINATION_CREATE_FAILED');
       destinationId = destination.id;
 
@@ -392,7 +479,7 @@ export default async function handler(req, res) {
       });
 
       if (!claimed?.id) {
-        await cleanupFailedClaim({ destinationId, createdClientId, clientId, userId: user.id, membershipCreated });
+        await cleanupFailedClaim({ destinationId, smartPageId, smartPageCreated, createdClientId, clientId, userId: user.id, membershipCreated });
         if (createdNewUser && createdUserId) await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
         return activationError(res, 'ACTIVATION_CONFLICT');
       }
@@ -409,7 +496,7 @@ export default async function handler(req, res) {
         last_failed_at: null,
         locked_until: null
       }).catch((postClaimError) => {
-        console.error('[public/activate:v4.4:pin-consume]', { plateId: plate.id, detail: postClaimError?.detail || postClaimError?.message });
+        console.error('[public/activate:v6.1:pin-consume]', { plateId: plate.id, detail: postClaimError?.detail || postClaimError?.message });
       });
 
       await supabaseRest('tap_audit_logs', {
@@ -417,10 +504,10 @@ export default async function handler(req, res) {
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({
           actor_user_id: user.id,
-          action: 'plate.self_activation.complete.v4_4',
+          action: 'plate.self_activation.complete.v6_1',
           entity_type: 'plate',
           entity_id: plate.id,
-          metadata: { client_id: clientId, destination_id: destinationId, type, source: 'atv', engine: 'rest_v4_4' }
+          metadata: { client_id: clientId, destination_id: destinationId, smart_page_id: smartPageId, type, source: 'atv', engine: 'rest_v6_1' }
         })
       }).catch(() => null);
 
@@ -429,26 +516,28 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true,
         activated: true,
-        activationEngine: 'REST_V4_4',
+        activationEngine: 'REST_V6_1',
         code,
         sessionReady,
         emailConfirmationRequired: mode === 'signup' && !sessionReady,
         plateId: plate.id,
         clientId,
+        destinationUrl,
+        smartPage: smartPage ? { id: smartPage.id, slug: smartPage.slug, businessName: smartPage.business_name, url: smartUrl(req, smartPage.slug) } : null,
         configuredAt: nowIso
       });
     } catch (innerError) {
       if (!claimSucceeded) {
-        await cleanupFailedClaim({ destinationId, createdClientId, clientId, userId: user.id, membershipCreated });
+        await cleanupFailedClaim({ destinationId, smartPageId, smartPageCreated, createdClientId, clientId, userId: user.id, membershipCreated });
       }
       throw innerError;
     }
   } catch (error) {
     const code = publicErrorCode(error);
     const reference = activationReference();
-    console.error('[public/activate:v4.4]', { reference, stage, code, status: error?.status, detail: error?.detail || error?.message });
+    console.error('[public/activate:v6.1]', { reference, stage, code, status: error?.status, detail: error?.detail || error?.message });
 
-    if (createdNewUser && createdUserId && stage === 'activate_rest_v4_4') {
+    if (createdNewUser && createdUserId && stage === 'activate_rest_v6_1') {
       await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
     }
 

@@ -72,7 +72,7 @@
     chatTimer: null,
     sidebarOpen: false,
     busy: false,
-    activation: { step: 1, selected: 'google', code: '', value: '', message: '', pin: '', plate: null, loading: false, loaded: false, error: '', accountMode: 'signup', fullName: '', companyName: '', phone: '', email: '', password: '', completed: false, sessionReady: false, confirmationRequired: false },
+    activation: { step: 1, selected: 'google', code: '', value: '', rawValue: '', message: '', pin: '', plate: null, loading: false, loaded: false, error: '', accountMode: 'signup', fullName: '', companyName: '', phone: '', email: '', password: '', smartBusinessName: '', smartSlug: '', completed: false, sessionReady: false, confirmationRequired: false },
     scanner: { stream: null, raf: null, detector: null, running: false }
   };
 
@@ -696,6 +696,8 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
       password: '',
       completed: false,
       sessionReady: false,
+      smartBusinessName: '',
+      smartSlug: '',
       confirmationRequired: false
     };
   }
@@ -707,10 +709,12 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
     try {
       const out = await apiFetch(`/api/public/activate?code=${encodeURIComponent(code)}`);
       state.activation.plate = out.plate || null;
-      if (out.plate?.smartPage?.url && !state.activation.rawValue) {
+      if (out.plate?.smartPage?.url) {
         state.activation.selected = 'smart';
         state.activation.value = out.plate.smartPage.url;
-        state.activation.rawValue = out.plate.smartPage.url;
+        state.activation.rawValue = '';
+        state.activation.smartBusinessName = out.plate.smartPage.businessName || state.activation.companyName || '';
+        state.activation.smartSlug = out.plate.smartPage.slug || String(out.plate.smartPage.url).split('/bio/')[1] || '';
       }
       state.activation.loaded = true;
     } catch (error) {
@@ -809,10 +813,25 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
     return items.map(([id,name,desc])=>`<button class="choice ${state.activation.selected===id?'active':''}" data-action="activation-choice" data-choice="${id}">${destinationIcon(id)}<strong>${name}</strong><span>${desc}</span></button>`).join('');
   }
 
+  function slugifySmartName(value) {
+    return String(value || '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '').slice(0, 48) || 'meu-negocio';
+  }
+
   function destinationField(type) {
     const raw = esc(state.activation.rawValue || '');
     if (type === 'whatsapp') return `<div class="stack"><div class="field"><label>WhatsApp de destino</label><input id="activation-value" class="input" inputmode="tel" value="${raw}" placeholder="(27) 99999-9999"></div><div class="field"><label>Mensagem inicial <span class="text-muted">(opcional)</span></label><textarea id="activation-message" class="textarea" placeholder="Olá! Vim pela plaquinha...">${esc(state.activation.message || '')}</textarea></div></div>`;
     if (type === 'google') return `<div class="field"><label>Link de avaliação do Google</label><input id="activation-value" class="input" type="url" value="${raw}" placeholder="https://g.page/r/.../review"><span class="field-help">Cole o link HTTPS de avaliação do estabelecimento.</span></div>`;
+    if (type === 'instagram') return `<div class="field"><label>Instagram da empresa</label><div class="input-prefix"><span>@</span><input id="activation-value" class="input" type="text" value="${raw.replace(/^@/,'')}" placeholder="nomedoperfil" autocomplete="off"></div><span class="field-help">Digite somente o @ ou o nome do perfil. O TAJO TAP monta o link automaticamente.</span></div>`;
+    if (type === 'map') return `<div class="field"><label>Localização</label><input id="activation-value" class="input" type="text" value="${raw}" placeholder="Rua, número, cidade ou link do Google Maps"><span class="field-help">Você pode informar o endereço do negócio ou colar um link HTTPS do mapa.</span></div>`;
+    if (type === 'smart') {
+      const business = esc(state.activation.smartBusinessName || state.activation.companyName || '');
+      const slug = esc(state.activation.smartSlug || slugifySmartName(state.activation.companyName));
+      const existing = state.activation.plate?.smartPage?.url || '';
+      return `<div class="smart-activation-box"><div class="activation-notice"><strong>Smart Page incluída.</strong> Você não precisa informar um link externo. A TAJO TAP cria e vincula o biosite automaticamente à sua plaquinha.</div><div class="form-grid"><div class="field"><label>Nome público do negócio</label><input id="activation-smart-name" class="input" value="${business}" maxlength="120" placeholder="Ex.: Bendito Pet"></div><div class="field"><label>Endereço da Smart Page</label><div class="input-prefix"><span>/bio/</span><input id="activation-smart-slug" class="input mono" value="${slug}" maxlength="63" pattern="[a-z0-9-]{3,63}" placeholder="benditopet"></div><span class="field-help" id="activation-smart-slug-help">${existing ? `Página já vinculada: ${esc(existing)}` : 'Ao sair do campo, o sistema verifica se este endereço está disponível.'}</span></div></div><div class="destination-option active"><div class="destination-icon">${ICONS.globe}</div><div class="destination-copy"><strong>Seu endereço público</strong><span>go.tajodigital.com.br/bio/<b id="activation-smart-preview">${slug}</b></span></div></div></div>`;
+    }
     return `<div class="field"><label>${destinationName(type)}</label><input id="activation-value" class="input" type="url" value="${raw}" placeholder="https://"><span class="field-help">Informe um endereço HTTPS válido.</span></div>`;
   }
 
@@ -853,6 +872,23 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
       const message = String(messageInput || '').trim();
       return `https://wa.me/${phone}${message ? `?text=${encodeURIComponent(message)}` : ''}`;
     }
+    if (state.activation.selected === 'instagram') {
+      const handle = raw.replace(/^@+/, '').replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').replace(/\/+$/, '');
+      if (!/^[A-Za-z0-9._]{1,30}$/.test(handle)) throw new Error('Informe um perfil válido do Instagram.');
+      state.activation.rawValue = handle;
+      return `https://instagram.com/${handle}`;
+    }
+    if (state.activation.selected === 'map') {
+      if (!raw) throw new Error('Informe o endereço ou link da localização.');
+      try {
+        const u = new URL(raw);
+        if (u.protocol !== 'https:' || !u.hostname || u.username || u.password) throw new Error();
+        return u.toString();
+      } catch {
+        if (raw.length < 5) throw new Error('Informe um endereço válido.');
+        return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(raw)}`;
+      }
+    }
     try {
       const u = new URL(raw);
       if (u.protocol !== 'https:' || !u.hostname || u.username || u.password) throw new Error();
@@ -864,9 +900,20 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
 
   function captureActivationDestination() {
     state.activation.pin = String($('#activation-pin')?.value || state.activation.pin || '').replace(/\D/g, '').slice(0, 6);
-    state.activation.rawValue = String($('#activation-value')?.value || state.activation.rawValue || '').trim();
     state.activation.message = String($('#activation-message')?.value || state.activation.message || '').trim();
     if (!/^\d{6}$/.test(state.activation.pin)) throw new Error('Informe os seis números do PIN de ativação.');
+
+    if (state.activation.selected === 'smart') {
+      state.activation.smartBusinessName = String($('#activation-smart-name')?.value || state.activation.smartBusinessName || state.activation.companyName || '').trim();
+      state.activation.smartSlug = slugifySmartName($('#activation-smart-slug')?.value || state.activation.smartSlug || state.activation.smartBusinessName);
+      if (state.activation.smartBusinessName.length < 2) throw new Error('Informe o nome público da Smart Page.');
+      if (!/^[a-z0-9][a-z0-9-]{2,62}$/.test(state.activation.smartSlug)) throw new Error('Escolha um endereço válido para a Smart Page.');
+      state.activation.rawValue = '';
+      state.activation.value = state.activation.plate?.smartPage?.url || `https://${CONFIG.goDomain}/bio/${state.activation.smartSlug}`;
+      return;
+    }
+
+    state.activation.rawValue = String($('#activation-value')?.value || state.activation.rawValue || '').trim();
     state.activation.value = normalizeActivationDestination(state.activation.rawValue, state.activation.message);
   }
 
@@ -1160,6 +1207,10 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
       state.activation.rawValue='';
       state.activation.value='';
       state.activation.message='';
+      if(state.activation.selected==='smart'){
+        state.activation.smartBusinessName = state.activation.smartBusinessName || state.activation.companyName || '';
+        state.activation.smartSlug = state.activation.smartSlug || slugifySmartName(state.activation.smartBusinessName);
+      }
       render();
     }
     if(action==='activation-next'){
@@ -1186,8 +1237,13 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
           email:state.activation.email,
           password:state.activation.password,
           type:state.activation.selected,
-          url:state.activation.value
+          url:state.activation.selected==='smart' ? null : state.activation.value,
+          smartBusinessName:state.activation.smartBusinessName || state.activation.companyName,
+          smartSlug:state.activation.smartSlug
         }});
+        if(out.destinationUrl) state.activation.value=out.destinationUrl;
+        if(out.smartPage?.businessName) state.activation.smartBusinessName=out.smartPage.businessName;
+        if(out.smartPage?.slug) state.activation.smartSlug=out.smartPage.slug;
         state.activation.completed=true;
         state.activation.sessionReady=Boolean(out.sessionReady);
         state.activation.confirmationRequired=Boolean(out.emailConfirmationRequired);
@@ -1281,7 +1337,42 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
     }
   });
 
+  document.addEventListener('input',(e)=>{
+    if(e.target.id==='activation-smart-slug'){
+      const clean=String(e.target.value||'')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+        .toLowerCase().replace(/[^a-z0-9-]+/g,'-')
+        .replace(/^-+|-+$/g,'').slice(0,63);
+      if(e.target.value!==clean)e.target.value=clean;
+      state.activation.smartSlug=clean;
+      const preview=$('#activation-smart-preview'); if(preview) preview.textContent=clean||'meu-negocio';
+      return;
+    }
+    if(e.target.id==='activation-smart-name'){
+      state.activation.smartBusinessName=String(e.target.value||'').slice(0,120);
+      return;
+    }
+  });
+
   document.addEventListener('change',async(e)=>{
+    if(e.target.id==='activation-smart-slug'){
+      const slug=String(e.target.value||'').trim();
+      const help=$('#activation-smart-slug-help');
+      if(!slug){ if(help) help.textContent='Informe um endereço para a Smart Page.'; return; }
+      try{
+        if(help) help.textContent='Verificando disponibilidade...';
+        const out=await apiFetch(`/api/public/activate?code=${encodeURIComponent(state.activation.code)}&checkSlug=${encodeURIComponent(slug)}`);
+        const finalSlug=out.available?out.slug:out.suggestedSlug;
+        state.activation.smartSlug=finalSlug;
+        e.target.value=finalSlug;
+        const preview=$('#activation-smart-preview'); if(preview) preview.textContent=finalSlug;
+        if(help) help.textContent=out.available?'✓ Endereço disponível.':`Este endereço já estava em uso. Sugestão aplicada: /bio/${finalSlug}`;
+      }catch(err){
+        if(help) help.textContent='Não foi possível verificar agora. A disponibilidade será confirmada ao ativar.';
+      }
+      return;
+    }
+
     if(e.target.matches('[data-plate-select]')){
       const code=String(e.target.dataset.plateSelect||''); const selected=new Set(state.selectedPlateCodes||[]);
       if(e.target.checked) selected.add(code); else selected.delete(code);
