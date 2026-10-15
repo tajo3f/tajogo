@@ -90,6 +90,34 @@ export async function resolveRole(userId) {
   return { role: 'unassigned' };
 }
 
+
+export async function claimPendingClientInvites(user) {
+  const email = String(user?.email || '').trim().toLowerCase();
+  if (!user?.id || !email) return 0;
+  const invites = await supabaseRest(`tap_client_access_invites?email=eq.${encodeURIComponent(email)}&status=eq.pending&select=id,client_id,plate_id&order=created_at.asc`).catch(() => []);
+  let claimed = 0;
+  for (const invite of invites || []) {
+    const existing = await supabaseRest(`tap_client_members?client_id=eq.${encodeURIComponent(invite.client_id)}&user_id=eq.${encodeURIComponent(user.id)}&select=client_id&limit=1`).catch(() => []);
+    if (!existing?.[0]) {
+      await supabaseRest('tap_client_members', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ client_id: invite.client_id, user_id: user.id, role: 'owner', active: true })
+      });
+    } else {
+      await supabaseRest(`tap_client_members?client_id=eq.${encodeURIComponent(invite.client_id)}&user_id=eq.${encodeURIComponent(user.id)}`, {
+        method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ active: true })
+      }).catch(() => null);
+    }
+    await supabaseRest(`tap_client_access_invites?id=eq.${encodeURIComponent(invite.id)}&status=eq.pending`, {
+      method: 'PATCH', headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ status: 'claimed', claimed_at: new Date().toISOString(), claimed_by: user.id })
+    }).catch(() => null);
+    claimed += 1;
+  }
+  return claimed;
+}
+
 export async function requireUser(req, res) {
   const user = await currentUser(req, res);
   if (!user) {

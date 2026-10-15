@@ -1,18 +1,40 @@
-# TAJO TAP V5
+# TAJO TAP V6
 
-Sistema de QR/NFC dinâmico, ativação segura, gestão de clientes, vendedores, lotes, estoque físico, produção, vendas, chat interno e analytics.
+TAJO TAP é uma plataforma operacional para produção, distribuição e gestão de plaquinhas inteligentes com QR/NFC dinâmicos, ativação por PIN, vendedores, clientes, analytics e Smart Pages.
 
-## Destaques da V5
+## V6
 
-- Dashboard operacional que recomenda ações.
-- Central de Produção com status físico por unidade.
-- Lotes vinculados a vendedores pelo login.
-- Isolamento de estoque por vendedor.
-- Vendedor não cria plaquinhas.
-- Arquivo de impressão por lote, padrão 10 × 8 cm configurável.
-- QR permanente `/q/TT-XXXXXX`, NFC `/n/TT-XXXXXX` e ativação `/atv/TT-XXXXXX`.
-- 1 Serverless Function na Vercel.
+A V6 adiciona a **TAJO Smart Page**: um biosite comercial editável pelo cliente e pelo vendedor responsável, com URL pública no formato:
 
-**Sistema desenvolvido por João Paulo Brandão.**
+```text
+https://go.tajodigital.com.br/bio/nome-do-negocio
+```
 
-Consulte `V5-INSTALACAO.md` antes de publicar.
+O vendedor continua sem permissão para criar plaquinhas. Ele recebe lotes da administração, vende uma unidade, informa o e-mail do comprador e o sistema cria/vincula a Smart Page e o acesso do cliente.
+
+## Stack
+
+- HTML/CSS/JavaScript Vanilla
+- Vercel
+- Supabase Auth + PostgreSQL
+- Uma única Vercel Function (`/api/index.js`)
+
+## Atualização do banco
+
+Quem já está na V5 deve executar somente:
+
+```text
+supabase/migrations/008_v6_smart_page_and_customer_access.sql
+```
+
+Veja `V6-INSTALACAO.md`.
+
+## Testes
+
+```bash
+npm test
+```
+
+## Crédito
+
+**Sistema desenvolvido por João Paulo Brandão**

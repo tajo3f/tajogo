@@ -1,5 +1,5 @@
 import { allowMethods, setNoStore } from '../_http.js';
-import { currentUser, resolveRole } from '../_auth.js';
+import { claimPendingClientInvites, currentUser, resolveRole } from '../_auth.js';
 import { publicErrorCode, supabaseRest } from '../_supabase.js';
 
 export default async function handler(req, res) {
@@ -8,6 +8,7 @@ export default async function handler(req, res) {
   try {
     const user = await currentUser(req, res);
     if (!user) return res.status(200).json({ ok: true, authenticated: false });
+    await claimPendingClientInvites(user).catch(() => 0);
     const role = await resolveRole(user.id);
     if (role.role === 'unassigned') return res.status(200).json({ ok: true, authenticated: true, role: 'unassigned' });
     const profiles = await supabaseRest(`tap_profiles?id=eq.${encodeURIComponent(user.id)}&select=full_name,phone&limit=1`);

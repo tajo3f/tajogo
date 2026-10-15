@@ -2,13 +2,14 @@ import crypto from 'node:crypto';
 import { allowMethods, apiError, readJson, safePlateCode, setNoStore, text } from '../_http.js';
 import { currentUser, setSessionCookies } from '../_auth.js';
 import { publicErrorCode, supabaseAuth, supabaseAuthAdmin, supabaseRest } from '../_supabase.js';
+import { smartUrl } from '../_smart.js';
 
 const TYPES = new Set(['google', 'whatsapp', 'instagram', 'smart', 'map', 'custom']);
 const LABELS = {
   google: 'Avaliações Google',
   whatsapp: 'WhatsApp',
   instagram: 'Instagram',
-  smart: 'Site / Cardápio',
+  smart: 'TAJO Smart Page',
   map: 'Localização',
   custom: 'Link personalizado'
 };
@@ -41,7 +42,8 @@ function activationError(res, code, retryAfter = null) {
     COMPANY_REQUIRED: [400, 'Informe o nome do estabelecimento.'],
     TYPE_INVALID: [400, 'Selecione um tipo de destino válido.'],
     URL_INVALID: [400, 'Informe um link HTTPS válido.'],
-    ACTIVATION_CONFLICT: [409, 'Esta plaquinha acabou de ser ativada em outra sessão. Atualize a página.']
+    ACTIVATION_CONFLICT: [409, 'Esta plaquinha acabou de ser ativada em outra sessão. Atualize a página.'],
+    EMAIL_MISMATCH: [403, 'Use o mesmo e-mail informado no momento da compra desta plaquinha.']
   };
   const [status, message] = map[code] || [409, 'Não foi possível concluir a ativação.'];
   setNoStore(res);
@@ -235,6 +237,8 @@ export default async function handler(req, res) {
 
       const configured = Boolean(plate.configuration_locked || plate.setup_status === 'completed' || plate.status === 'active');
       const available = !configured && ['inventory', 'unconfigured'].includes(plate.status);
+      const smartRows = await supabaseRest(`tap_smart_pages?plate_id=eq.${encodeURIComponent(plate.id)}&is_published=eq.true&select=id,slug,business_name&limit=1`).catch(() => []);
+      const smartPage = smartRows?.[0] || null;
       return res.status(200).json({
         ok: true,
         activationEngine: 'REST_V4_4',
@@ -246,7 +250,8 @@ export default async function handler(req, res) {
           setupStatus: plate.setup_status || (configured ? 'completed' : 'pending'),
           configured,
           available,
-          configuredAt: plate.configured_at || null
+          configuredAt: plate.configured_at || null,
+          smartPage: smartPage ? { id: smartPage.id, businessName: smartPage.business_name, url: smartUrl(req, smartPage.slug) } : null
         }
       });
     }
@@ -344,6 +349,15 @@ export default async function handler(req, res) {
     let claimSucceeded = false;
 
     try {
+      if (clientId) {
+        const assignedRows = await supabaseRest(`tap_clients?id=eq.${encodeURIComponent(clientId)}&select=id,email&limit=1`);
+        const assignedEmail = String(assignedRows?.[0]?.email || '').trim().toLowerCase();
+        if (assignedEmail && assignedEmail !== accountEmail) {
+          if (createdNewUser && createdUserId) await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
+          return activationError(res, 'EMAIL_MISMATCH');
+        }
+      }
+
       if (!clientId) {
         const client = await createClient({ companyName, contactName: accountName, phone: accountPhone, email: accountEmail, userId: user.id });
         if (!client?.id) throw new Error('CLIENT_CREATE_FAILED');

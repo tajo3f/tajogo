@@ -1,7 +1,7 @@
 import { allowMethods, apiError, readJson, setNoStore, text } from '../_http.js';
 import { setSessionCookies } from '../_auth.js';
 import { publicErrorCode, supabaseAuth } from '../_supabase.js';
-import { resolveRole } from '../_auth.js';
+import { claimPendingClientInvites, resolveRole } from '../_auth.js';
 
 export default async function handler(req, res) {
   setNoStore(res);
@@ -21,6 +21,7 @@ export default async function handler(req, res) {
     if (!session?.access_token || !session?.refresh_token || !session?.user?.id) {
       return apiError(res, 401, 'LOGIN_FAILED', 'Não foi possível iniciar sua sessão.');
     }
+    await claimPendingClientInvites(session.user).catch(() => 0);
     const role = await resolveRole(session.user.id);
     if (role.role === 'unassigned') {
       return apiError(res, 403, 'NO_ACCESS', 'Sua conta existe, mas ainda não foi vinculada ao TAJO TAP.');

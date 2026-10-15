@@ -1,6 +1,7 @@
 import { allowMethods, readJson, setNoStore } from '../_http.js';
 import { requireSeller } from '../_auth.js';
 import { publicErrorCode, supabaseRest } from '../_supabase.js';
+import { httpsUrl, normalizeEmail, smartUrl, uniqueSlug, validEmail } from '../_smart.js';
 
 const clean=(v,n=240)=>String(v??'').trim().slice(0,n);
 const LEAD_STATUS=new Set(['novo','contatado','respondeu','negociacao','proposta','fechado','perdido']);
@@ -56,8 +57,43 @@ async function sellerSnapshot(auth){
 }
 
 async function sellerPlate(sid,code){
-  const rows=await supabaseRest(`tap_plates?code=eq.${encodeURIComponent(code)}&seller_id=eq.${encodeURIComponent(sid)}&select=id,code,name,batch_id,production_status,status,setup_status,configuration_locked&limit=1`);
+  const rows=await supabaseRest(`tap_plates?code=eq.${encodeURIComponent(code)}&seller_id=eq.${encodeURIComponent(sid)}&select=id,code,name,batch_id,client_id,current_destination_id,production_status,status,setup_status,configuration_locked&limit=1`);
   return rows?.[0]||null;
+}
+
+
+async function findOrCreateClient({customerName,email,userId}){
+  const existing=await supabaseRest(`tap_clients?email=eq.${encodeURIComponent(email)}&select=id,name,email&limit=1`).catch(()=>[]);
+  if(existing?.[0]) return existing[0];
+  const rows=await supabaseRest('tap_clients?select=id,name,email',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify({name:customerName,email,status:'active',created_by:userId})});
+  return rows?.[0]||null;
+}
+
+async function ensureInvite({clientId,plateId,sellerId,email}){
+  const found=await supabaseRest(`tap_client_access_invites?client_id=eq.${encodeURIComponent(clientId)}&email=eq.${encodeURIComponent(email)}&select=id,status&limit=1`).catch(()=>[]);
+  if(found?.[0]){
+    await supabaseRest(`tap_client_access_invites?id=eq.${encodeURIComponent(found[0].id)}`,{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({plate_id:plateId,seller_id:sellerId,status:'pending',claimed_at:null,claimed_by:null})}).catch(()=>null);
+    return found[0].id;
+  }
+  const rows=await supabaseRest('tap_client_access_invites?select=id',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify({client_id:clientId,plate_id:plateId,seller_id:sellerId,email,status:'pending'})});
+  return rows?.[0]?.id||null;
+}
+
+async function ensureSmartPage(req,{clientId,plate,sellerId,businessName}){
+  const found=await supabaseRest(`tap_smart_pages?plate_id=eq.${encodeURIComponent(plate.id)}&select=*&limit=1`).catch(()=>[]);
+  if(found?.[0]) return found[0];
+  const slug=await uniqueSlug(businessName);
+  const rows=await supabaseRest('tap_smart_pages?select=*',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify({client_id:clientId,plate_id:plate.id,created_by_seller_id:sellerId,slug,business_name:businessName,subtitle:'Sua empresa mais perto do cliente',bio:'Encontre nossos principais canais, localização e informações em um só lugar.',seller_edit_allowed:true,is_published:true})});
+  return rows?.[0]||null;
+}
+
+async function setPlateDestination({plate,userId,type,url,label}){
+  await supabaseRest(`tap_plate_destinations?plate_id=eq.${encodeURIComponent(plate.id)}&is_active=eq.true`,{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({is_active:false})}).catch(()=>null);
+  const rows=await supabaseRest('tap_plate_destinations?select=id',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify({plate_id:plate.id,type,label,url,is_active:true,created_by:userId})});
+  const id=rows?.[0]?.id;
+  if(!id) throw new Error('DESTINATION_CREATE_FAILED');
+  await supabaseRest(`tap_plates?id=eq.${encodeURIComponent(plate.id)}`,{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({current_destination_id:id,updated_at:new Date().toISOString()})});
+  return id;
 }
 
 export default async function handler(req,res){
@@ -83,15 +119,33 @@ export default async function handler(req,res){
     }
 
     if(req.method==='POST'&&kind==='sale'){
-      const customer_name=clean(body.customer_name,160),amount_cents=money(body.amount),plateCode=clean(body.plate_code,32).toUpperCase();
-      if(!customer_name||amount_cents<=0||!plateCode)return res.status(400).json({ok:false,error:'SALE_INVALID',message:'Informe plaquinha, cliente e valor da venda.'});
+      const customer_name=clean(body.customer_name,160),customer_email=validEmail(body.customer_email),amount_cents=money(body.amount),plateCode=clean(body.plate_code,32).toUpperCase();
+      if(!customer_name||!customer_email||amount_cents<=0||!plateCode)return res.status(400).json({ok:false,error:'SALE_INVALID',message:'Informe plaquinha, cliente, e-mail válido e valor da venda.'});
       const plate=await sellerPlate(auth.seller.id,plateCode); if(!plate)return res.status(404).json({ok:false,error:'PLATE_NOT_ASSIGNED',message:'Essa plaquinha não pertence a nenhum dos seus lotes.'});
       if(plate.production_status!=='in_stock')return res.status(409).json({ok:false,error:'PLATE_NOT_IN_STOCK',message:'A plaquinha precisa estar em estoque antes de registrar a venda.'});
+      const client=await findOrCreateClient({customerName:customer_name,email:customer_email,userId:auth.user.id});
+      if(!client?.id)throw new Error('CLIENT_CREATE_FAILED');
+      const smartPage=await ensureSmartPage(req,{clientId:client.id,plate,sellerId:auth.seller.id,businessName:customer_name});
+      if(!smartPage?.id)throw new Error('SMART_PAGE_CREATE_FAILED');
+      const smartPageUrl=smartUrl(req,smartPage.slug);
+      await ensureInvite({clientId:client.id,plateId:plate.id,sellerId:auth.seller.id,email:customer_email});
       const rate=Number(auth.seller.commission_rate||0),commission_cents=Math.round(amount_cents*rate/100),now=new Date().toISOString();
-      const payload={seller_id:auth.seller.id,plate_id:plate.id,customer_name,amount_cents,commission_rate:rate,commission_cents,status:'pending',notes:clean(body.notes,1000)||null};
+      const payload={seller_id:auth.seller.id,client_id:client.id,plate_id:plate.id,customer_name,customer_email,amount_cents,commission_rate:rate,commission_cents,status:'pending',notes:clean(body.notes,1000)||null};
       const rows=await supabaseRest('tap_sales',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify(payload)});
-      await supabaseRest(`tap_plates?id=eq.${encodeURIComponent(plate.id)}&seller_id=eq.${encodeURIComponent(auth.seller.id)}&production_status=eq.in_stock`,{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({production_status:'sold',production_status_updated_at:now,sold_at:now,updated_at:now})});
-      return res.status(201).json({ok:true,sale:rows?.[0]});
+      await setPlateDestination({plate,userId:auth.user.id,type:'smart',url:smartPageUrl,label:'TAJO Smart Page'});
+      await supabaseRest(`tap_plates?id=eq.${encodeURIComponent(plate.id)}&seller_id=eq.${encodeURIComponent(auth.seller.id)}&production_status=eq.in_stock`,{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({client_id:client.id,production_status:'sold',production_status_updated_at:now,sold_at:now,updated_at:now})});
+      return res.status(201).json({ok:true,sale:rows?.[0],client:{id:client.id,email:customer_email},smartPage:{id:smartPage.id,slug:smartPage.slug,url:smartPageUrl}});
+    }
+
+    if(req.method==='PATCH'&&kind==='destination'){
+      const code=clean(body.code,32).toUpperCase(),plate=await sellerPlate(auth.seller.id,code); if(!plate)return res.status(404).json({ok:false,error:'PLATE_NOT_ASSIGNED',message:'Plaquinha não encontrada nos seus lotes.'});
+      const type=clean(body.type,30),url=httpsUrl(body.url||body.destination);
+      const allowed=new Set(['google','whatsapp','instagram','smart','map','custom']);
+      if(!allowed.has(type)||!url)return res.status(400).json({ok:false,error:'DESTINATION_INVALID',message:'Escolha um destino e informe um link HTTPS válido.'});
+      const labels={google:'Avaliações Google',whatsapp:'WhatsApp',instagram:'Instagram',smart:'TAJO Smart Page',map:'Localização',custom:'Link personalizado'};
+      await setPlateDestination({plate,userId:auth.user.id,type,url,label:labels[type]||'Destino'});
+      await supabaseRest('tap_audit_logs',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify({actor_user_id:auth.user.id,action:'seller.plate.destination.update',entity_type:'plate',entity_id:plate.id,metadata:{seller_id:auth.seller.id,type}})}).catch(()=>null);
+      return res.status(200).json({ok:true,code,type,url});
     }
 
     if(req.method==='PATCH'&&kind==='plate-delivered'){

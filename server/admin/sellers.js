@@ -17,7 +17,7 @@ export default async function handler(req,res){
     const auth=await requireAdmin(req,res); if(!auth)return;
     if(req.method==='GET'){
       const sellers=await supabaseRest('tap_sellers?select=*&order=created_at.desc');
-      const sales=await supabaseRest('tap_sales?select=seller_id,amount_cents,commission_cents,status');
+      const sales=await supabaseRest('tap_sales?select=id,seller_id,client_id,plate_id,customer_name,customer_email,amount_cents,commission_rate,commission_cents,status,sold_at');
       const leads=await supabaseRest('tap_seller_leads?select=seller_id,status');
       const enriched=(sellers||[]).map(s=>{const ss=(sales||[]).filter(x=>x.seller_id===s.id);const ll=(leads||[]).filter(x=>x.seller_id===s.id);return {...s,metrics:{sales:ss.length,paid_sales:ss.filter(x=>x.status==='paid').length,revenue_cents:ss.filter(x=>x.status==='paid').reduce((a,x)=>a+Number(x.amount_cents||0),0),commission_cents:ss.filter(x=>x.status==='paid').reduce((a,x)=>a+Number(x.commission_cents||0),0),leads:ll.length,won:ll.filter(x=>x.status==='fechado').length}}});
       return res.status(200).json({ok:true,sellers:enriched,sales:(sales||[])});

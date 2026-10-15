@@ -18,6 +18,9 @@ import adminSellers from '../server/admin/sellers.js';
 import adminBatches from '../server/admin/batches.js';
 import adminPlateBulk from '../server/admin/plate-bulk.js';
 import adminOperations from '../server/admin/operations.js';
+import smartPages from '../server/smart-pages.js';
+import publicSmartPage from '../server/public/smart-page.js';
+import publicSmartLink from '../server/public/smart-link.js';
 
 const ROUTES = new Map([
   ['auth/login', authLogin],
@@ -39,7 +42,10 @@ const ROUTES = new Map([
   ['admin/sellers', adminSellers],
   ['admin/batches', adminBatches],
   ['admin/plates/bulk-delete', adminPlateBulk],
-  ['admin/operations', adminOperations]
+  ['admin/operations', adminOperations],
+  ['smart-pages', smartPages],
+  ['public/smart-page', publicSmartPage],
+  ['public/smart-link', publicSmartLink]
 ]);
 
 function routeName(value) {
