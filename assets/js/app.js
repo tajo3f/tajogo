@@ -396,8 +396,53 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
     renderQRCodes();
   }
 
+  function destinationEditorValue(type, url='') {
+    const raw=String(url||'').trim();
+    if(type==='instagram') return raw.replace(/^https?:\/\/(www\.)?instagram\.com\//i,'').replace(/^@+/,'').replace(/\/+$/,'');
+    if(type==='whatsapp') {
+      try { const u=new URL(raw); if(['wa.me','api.whatsapp.com','whatsapp.com','www.whatsapp.com'].includes(u.hostname.toLowerCase())) return u.pathname.replace(/\D/g,''); } catch {}
+      return raw;
+    }
+    return raw;
+  }
+
+  function smartPageForPlateCode(code) {
+    const adminPlate=(state.plaques||[]).find(x=>x.code===code);
+    if(adminPlate?.id){ const found=(state.smartPages||[]).find(x=>x.plateId===adminPlate.id); if(found)return found; }
+    const sellerPlate=(state.sellerData.lots||[]).flatMap(l=>l.plates||[]).find(x=>x.code===code);
+    if(sellerPlate?.id){ const found=(state.smartPages||[]).find(x=>x.plateId===sellerPlate.id); if(found)return found; }
+    return null;
+  }
+
+  function destinationEditFields(type,{currentType='',currentUrl='',smartUrl=''}={}) {
+    const initial=currentType===type ? destinationEditorValue(type,currentUrl) : '';
+    if(type==='smart') {
+      const value=smartUrl || (currentType==='smart' ? currentUrl : '');
+      if(!value) return `<div class="activation-notice"><strong>Nenhuma Smart Page vinculada.</strong> Crie ou vincule a Smart Page deste cliente antes de selecionar este destino.</div><input type="hidden" name="destination" value="">`;
+      return `<div class="destination-option active"><div class="destination-icon">${ICONS.globe}</div><div class="destination-copy"><strong>TAJO Smart Page</strong><span>${esc(value)}</span></div></div><input type="hidden" name="destination" value="${esc(value)}"><span class="field-help">A Smart Page continua existindo mesmo quando você usa outro destino. Você pode voltar para ela quando quiser.</span>`;
+    }
+    if(type==='instagram') return `<div class="field"><label>Instagram</label><div class="input-prefix"><span>@</span><input class="input" name="destination" value="${esc(initial)}" placeholder="nomedoperfil" autocomplete="off" required></div><span class="field-help">Digite apenas o @ ou o nome do perfil. O TAJO TAP cria o link automaticamente.</span></div>`;
+    if(type==='whatsapp') return `<div class="stack"><div class="field"><label>WhatsApp</label><input class="input" name="destination" inputmode="tel" value="${esc(initial)}" placeholder="(27) 99999-9999" required><span class="field-help">Pode informar apenas o número com DDD.</span></div><div class="field"><label>Mensagem inicial <span class="text-muted">(opcional)</span></label><textarea class="input" name="message" rows="2" placeholder="Olá! Vim pela TAJO TAP..."></textarea></div></div>`;
+    if(type==='map') return `<div class="field"><label>Localização</label><input class="input" name="destination" value="${esc(initial)}" placeholder="Rua, número, cidade ou link do Google Maps" required><span class="field-help">Se informar um endereço, o sistema monta o link do Google Maps automaticamente.</span></div>`;
+    if(type==='google') return `<div class="field"><label>Link de avaliação do Google</label><input class="input" type="url" name="destination" value="${esc(initial)}" placeholder="https://g.page/r/.../review" required><span class="field-help">Cole o link HTTPS de avaliação do estabelecimento.</span></div>`;
+    return `<div class="field"><label>Link personalizado</label><input class="input" type="url" name="destination" value="${esc(initial)}" placeholder="https://" required><span class="field-help">Use um endereço HTTPS válido.</span></div>`;
+  }
+
+  function refreshDestinationFields(form,type){
+    if(!form)return;
+    const holder=$('[data-destination-fields]',form); if(!holder)return;
+    const currentType=form.dataset.currentType||'';
+    const currentUrl=form.dataset.currentUrl||'';
+    const smartUrl=form.dataset.smartUrl||'';
+    holder.innerHTML=destinationEditFields(type,{currentType,currentUrl,smartUrl});
+  }
+
   function sellerDestinationModal(code, smartUrlValue=''){
-    showModal(`<div class="modal-head"><div><div class="eyebrow">${esc(code)}</div><h2>Direcionamento da plaquinha</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="seller-destination-form" data-code="${esc(code)}"><div class="modal-body stack"><div class="activation-notice"><strong>Você pode editar somente plaquinhas dos seus lotes.</strong> O QR físico permanece o mesmo.</div>${smartUrlValue?`<button type="button" class="destination-option active" data-action="fill-seller-smart" data-url="${esc(smartUrlValue)}"><div class="destination-icon">${ICONS.globe}</div><div class="destination-copy"><strong>Usar TAJO Smart Page</strong><span>${esc(smartUrlValue)}</span></div></button>`:''}<div class="field"><label>Tipo</label><select class="select" name="type"><option value="smart">TAJO Smart Page</option><option value="google">Avaliações Google</option><option value="whatsapp">WhatsApp</option><option value="instagram">Instagram</option><option value="map">Localização</option><option value="custom">Link personalizado</option></select></div><div class="field"><label>Link HTTPS</label><input class="input" name="destination" value="${esc(smartUrlValue)}" placeholder="https://..." required></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar destino</button></div></form>`);
+    const smart=smartPageForPlateCode(code);
+    const smartUrl=smart?.publicUrl||smartUrlValue||'';
+    const currentType=smartUrl?'smart':'custom';
+    const currentUrl=smartUrl;
+    showModal(`<div class="modal-head"><div><div class="eyebrow">${esc(code)}</div><h2>Direcionamento da plaquinha</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="seller-destination-form" data-code="${esc(code)}" data-current-type="${esc(currentType)}" data-current-url="${esc(currentUrl)}" data-smart-url="${esc(smartUrl)}"><div class="modal-body stack"><div class="activation-notice"><strong>O QR físico permanece o mesmo.</strong> Você pode trocar o destino quantas vezes precisar dentro das plaquinhas dos seus lotes.</div><div class="choice-grid destination-edit-grid">${[['smart','Smart Page'],['google','Google'],['whatsapp','WhatsApp'],['instagram','Instagram'],['map','Localização'],['custom','Outro link']].map(([id,n])=>`<button type="button" class="choice destination-modal-choice ${currentType===id?'active':''}" data-type="${id}">${destinationIcon(id)}<strong>${n}</strong><span>${id==='smart'?'Voltar para o biosite':'Alterar redirecionamento'}</span></button>`).join('')}</div><input type="hidden" name="type" value="${esc(currentType)}"><div class="stack" data-destination-fields>${destinationEditFields(currentType,{currentType,currentUrl,smartUrl})}</div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar destino</button></div></form>`);
   }
 
   function sellerLeadsPage(){ const leads=state.sellerData.leads||[]; return `${pageHead('CRM individual','Meus leads','Somente você e a administração TAJO podem visualizar sua carteira.',`<button class="btn btn-primary" data-action="new-seller-lead">${ICONS.plus} Novo lead</button>`)}<div class="card table-card"><div class="responsive-table"><table><thead><tr><th>Negócio</th><th>Contato</th><th>Cidade</th><th>Status</th><th>Próximo contato</th></tr></thead><tbody>${leads.map(l=>`<tr><td><strong>${esc(l.business_name)}</strong><small>${esc(l.niche||'')}</small></td><td>${esc(l.contact_name||'—')}<small>${esc(l.phone||'')}</small></td><td>${esc(l.city||'—')}</td><td><select class="select seller-lead-status" data-id="${esc(l.id)}">${['novo','contatado','respondeu','negociacao','proposta','fechado','perdido'].map(x=>`<option ${l.status===x?'selected':''} value="${x}">${x}</option>`).join('')}</select></td><td>${l.next_contact_at?new Date(l.next_contact_at).toLocaleString('pt-BR'):'—'}</td></tr>`).join('')||'<tr><td colspan="5">Nenhum lead cadastrado.</td></tr>'}</tbody></table></div></div>`; }
@@ -970,8 +1015,11 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
 
   function editDestinationModal(code) {
     const p=state.plaques.find(x=>x.code===code); if(!p) return;
-    const current=p.destinationType||'google';
-    showModal(`<div class="modal-head"><div><div class="eyebrow">${esc(code)}</div><h2>Alterar destino</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="destination-form" data-code="${esc(code)}"><div class="modal-body"><p class="text-muted" style="margin-top:0">O QR Code e o NFC da plaquinha permanecem os mesmos.</p><div class="choice-grid" id="destination-choice-grid">${[['google','Avaliações Google'],['whatsapp','WhatsApp'],['instagram','Instagram'],['smart','Smart Page'],['map','Localização'],['custom','Outro link']].map(([id,n])=>`<button type="button" class="choice destination-modal-choice ${current===id?'active':''}" data-type="${id}">${destinationIcon(id)}<strong>${n}</strong><span>${id==='smart'?'Página inteligente TAJO':'Redirecionamento dinâmico'}</span></button>`).join('')}</div><input type="hidden" name="type" value="${current}"><div class="field"><label>Destino / configuração</label><input class="input" name="destination" value="${esc(p.destination)}" placeholder="https://..." required><span class="field-help">O backend valida o endereço antes de salvar. Use sempre um link HTTPS válido.</span></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar alteração</button></div></form>`);
+    const current=p.destinationType||'custom';
+    const currentUrl=p.destination||'';
+    const smart=smartPageForPlateCode(code);
+    const smartUrl=smart?.publicUrl || (current==='smart'?currentUrl:'');
+    showModal(`<div class="modal-head"><div><div class="eyebrow">${esc(code)}</div><h2>Alterar destino</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="destination-form" data-code="${esc(code)}" data-current-type="${esc(current)}" data-current-url="${esc(currentUrl)}" data-smart-url="${esc(smartUrl)}"><div class="modal-body stack"><div class="activation-notice"><strong>Destino dinâmico.</strong> O QR Code e o NFC físicos permanecem os mesmos. A Smart Page não é apagada quando você usa Instagram, WhatsApp ou outro link.</div><div class="choice-grid destination-edit-grid">${[['google','Avaliações Google'],['whatsapp','WhatsApp'],['instagram','Instagram'],['smart','Smart Page'],['map','Localização'],['custom','Outro link']].map(([id,n])=>`<button type="button" class="choice destination-modal-choice ${current===id?'active':''}" data-type="${id}">${destinationIcon(id)}<strong>${n}</strong><span>${id==='smart'?'Página inteligente TAJO':'Redirecionamento dinâmico'}</span></button>`).join('')}</div><input type="hidden" name="type" value="${esc(current)}"><div class="stack" data-destination-fields>${destinationEditFields(current,{currentType:current,currentUrl,smartUrl})}</div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar alteração</button></div></form>`);
   }
 
   function newClientModal() {
@@ -1175,7 +1223,6 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
     if(action==='go-sellers') go('sellers');
     if(action==='edit-smart-page') smartPageModal(actionEl.dataset.id);
     if(action==='seller-destination' && state.role==='seller') sellerDestinationModal(actionEl.dataset.code, actionEl.dataset.smart||'');
-    if(action==='fill-seller-smart'){ const input=$('#seller-destination-form [name="destination"]'); const type=$('#seller-destination-form [name="type"]'); if(input) input.value=actionEl.dataset.url||''; if(type) type.value='smart'; }
     if(action==='new-seller-lead') showModal(`<div class="modal-head"><div><div class="eyebrow">CRM</div><h2>Novo lead</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="seller-lead-form"><div class="modal-body stack"><div class="field"><label>Negócio</label><input class="input" name="business_name" required></div><div class="form-grid"><div class="field"><label>Contato</label><input class="input" name="contact_name"></div><div class="field"><label>WhatsApp</label><input class="input" name="phone"></div></div><div class="form-grid"><div class="field"><label>Cidade</label><input class="input" name="city"></div><div class="field"><label>Nicho</label><input class="input" name="niche"></div></div><div class="field"><label>Instagram</label><input class="input" name="instagram"></div><div class="field"><label>Observações</label><textarea class="input" name="notes" rows="3"></textarea></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar lead</button></div></form>`);
     if(action==='new-batch') showNewBatchModal();
     if(action==='print-batch') printBatch(batchById(actionEl.dataset.id));
@@ -1388,11 +1435,20 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
     }
     if(e.target.id==='seller-destination-form'){
       e.preventDefault(); if(!e.target.reportValidity())return; const fd=new FormData(e.target);
-      try{await apiFetch('/api/seller/hub',{method:'PATCH',body:{kind:'destination',code:e.target.dataset.code,type:fd.get('type'),url:fd.get('destination')}});closeModal();toast('Destino atualizado','O QR físico continua o mesmo.');}catch(err){toast('Não foi possível alterar',err.message);}
+      try{
+        await apiFetch('/api/seller/hub',{method:'PATCH',body:{kind:'destination',code:e.target.dataset.code,type:fd.get('type'),value:fd.get('destination'),message:fd.get('message')}});
+        await Promise.all([loadSellerData(),loadSmartPages()]);
+        closeModal();toast('Destino atualizado','O QR físico continua o mesmo e você pode trocar novamente quando precisar.');render();
+      }catch(err){toast('Não foi possível alterar',err.message);}
     }
     if(e.target.id==='destination-form'){
       e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target), p=state.plaques.find(x=>x.code===e.target.dataset.code); if(!p) return;
-      try { const endpoint=state.role==='admin'?'/api/admin/destination':'/api/client/destination'; const out=await apiFetch(endpoint,{method:'POST',body:{code:p.code,type:fd.get('type'),url:fd.get('destination')}}); Object.assign(p,out.plate); closeModal();toast('Destino atualizado','A plaquinha física continua a mesma.');render(); }
+      try {
+        const endpoint=state.role==='admin'?'/api/admin/destination':'/api/client/destination';
+        await apiFetch(endpoint,{method:'POST',body:{code:p.code,type:fd.get('type'),value:fd.get('destination'),message:fd.get('message')}});
+        await refreshRoleData();
+        closeModal();toast('Destino atualizado','A Smart Page foi preservada e o QR físico continua o mesmo.');render();
+      }
       catch(err){toast('Não foi possível alterar',err.message);}
     }
   });
@@ -1455,7 +1511,11 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
 
   document.addEventListener('click',(e)=>{
     const choice=e.target.closest('.destination-modal-choice'); if(!choice) return;
-    $$('.destination-modal-choice').forEach(x=>x.classList.remove('active')); choice.classList.add('active'); const f=$('#destination-form [name="type"]'); if(f) f.value=choice.dataset.type;
+    const form=choice.closest('#destination-form, #seller-destination-form'); if(!form)return;
+    $$('.destination-modal-choice',form).forEach(x=>x.classList.remove('active'));
+    choice.classList.add('active');
+    const f=$('[name="type"]',form); if(f) f.value=choice.dataset.type;
+    refreshDestinationFields(form,choice.dataset.type);
   });
 
   window.addEventListener('hashchange',render);

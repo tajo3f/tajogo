@@ -2,6 +2,7 @@ import { allowMethods, readJson, setNoStore } from '../_http.js';
 import { requireSeller } from '../_auth.js';
 import { publicErrorCode, supabaseRest } from '../_supabase.js';
 import { httpsUrl, normalizeEmail, smartUrl, uniqueSlug, validEmail } from '../_smart.js';
+import { changePlateDestination, DESTINATION_LABELS, DESTINATION_TYPES, normalizeDestination } from '../_destination.js';
 
 const clean=(v,n=240)=>String(v??'').trim().slice(0,n);
 const LEAD_STATUS=new Set(['novo','contatado','respondeu','negociacao','proposta','fechado','perdido']);
@@ -89,12 +90,8 @@ async function ensureSmartPage(req,{clientId,plate,sellerId,businessName}){
 }
 
 async function setPlateDestination({plate,userId,type,url,label}){
-  await supabaseRest(`tap_plate_destinations?plate_id=eq.${encodeURIComponent(plate.id)}&is_active=eq.true`,{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({is_active:false})}).catch(()=>null);
-  const rows=await supabaseRest('tap_plate_destinations?select=id',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify({plate_id:plate.id,type,label,url,is_active:true,created_by:userId})});
-  const id=rows?.[0]?.id;
-  if(!id) throw new Error('DESTINATION_CREATE_FAILED');
-  await supabaseRest(`tap_plates?id=eq.${encodeURIComponent(plate.id)}`,{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({current_destination_id:id,updated_at:new Date().toISOString()})});
-  return id;
+  const out=await changePlateDestination({plate,actorUserId:userId,type,url,label});
+  return out.id;
 }
 
 export default async function handler(req,res){
@@ -140,12 +137,14 @@ export default async function handler(req,res){
 
     if(req.method==='PATCH'&&kind==='destination'){
       const code=clean(body.code,32).toUpperCase(),plate=await sellerPlate(auth.seller.id,code); if(!plate)return res.status(404).json({ok:false,error:'PLATE_NOT_ASSIGNED',message:'Plaquinha não encontrada nos seus lotes.'});
-      const type=clean(body.type,30),url=httpsUrl(body.url||body.destination);
-      const allowed=new Set(['google','whatsapp','instagram','smart','map','custom']);
-      if(!allowed.has(type)||!url)return res.status(400).json({ok:false,error:'DESTINATION_INVALID',message:'Escolha um destino e informe um link HTTPS válido.'});
-      const labels={google:'Avaliações Google',whatsapp:'WhatsApp',instagram:'Instagram',smart:'TAJO Smart Page',map:'Localização',custom:'Link personalizado'};
-      await setPlateDestination({plate,userId:auth.user.id,type,url,label:labels[type]||'Destino'});
-      await supabaseRest('tap_audit_logs',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify({actor_user_id:auth.user.id,action:'seller.plate.destination.update',entity_type:'plate',entity_id:plate.id,metadata:{seller_id:auth.seller.id,type}})}).catch(()=>null);
+      const type=clean(body.type,30).toLowerCase();
+      if(!DESTINATION_TYPES.has(type))return res.status(400).json({ok:false,error:'DESTINATION_TYPE_INVALID',message:'Escolha um tipo de destino válido.'});
+      let url;
+      try{url=normalizeDestination(type,body.value??body.url??body.destination,body.message);}catch(error){
+        const messages={DESTINATION_INSTAGRAM_INVALID:'Informe um @ ou perfil válido do Instagram.',DESTINATION_WHATSAPP_INVALID:'Informe um WhatsApp válido com DDD.',DESTINATION_MAP_INVALID:'Informe um endereço ou link de localização válido.',DESTINATION_URL_INVALID:'Informe um endereço HTTPS válido.'};
+        return res.status(400).json({ok:false,error:error.code||'DESTINATION_INVALID',message:messages[error.code]||'Destino inválido.'});
+      }
+      await setPlateDestination({plate,userId:auth.user.id,type,url,label:DESTINATION_LABELS[type]||'Destino'});
       return res.status(200).json({ok:true,code,type,url});
     }
 

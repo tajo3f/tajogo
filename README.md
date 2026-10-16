@@ -1,10 +1,17 @@
-# TAJO TAP V7.0 — Wi‑Fi Connect + Smart Page
+# TAJO TAP V7.1 — Wi‑Fi Connect + Smart Page
 
 TAJO TAP é a plataforma operacional da TAJO para produção, distribuição e gestão de plaquinhas inteligentes, com QR dinâmico, ativação por PIN, lotes, vendedores, clientes, analytics e Smart Pages.
 
 **Sistema desenvolvido por João Paulo Brandão.**
 
-## Novidades da V7.0
+## Novidades da V7.1
+
+
+### Correção V7.1 — troca de destino
+
+A V7.1 corrige o fluxo de alteração repetida de destino depois da ativação. A Smart Page permanece vinculada mesmo quando o usuário muda temporariamente para Instagram, WhatsApp, Google, localização ou outro link. O painel permite voltar para a Smart Page sem recriar o biosite.
+
+O editor também passou a usar campos específicos por destino e o backend não depende mais da RPC antiga `tap_set_plate_destination()` para essas alterações.
 
 A V7 adiciona **Wi‑Fi Connect** de duas formas complementares:
 
@@ -79,4 +86,4 @@ npm test
 
 A suíte valida sintaxe JS, assets, encoder QR, exposição de secrets, limite do Vercel Hobby, compatibilidade das versões anteriores, payload Wi‑Fi, migration V7 e integração estática Smart Page/Wi‑Fi.
 
-Consulte `V7-INSTALACAO.md` antes do deploy.
+Consulte `V7-INSTALACAO.md` para a base V7 e `V7.1-INSTALACAO.md` para esta correção.
