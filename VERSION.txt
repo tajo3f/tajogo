@@ -1,2 +1,2 @@
-TAJO TAP FULLSTACK V7.1
-Destination Switching Hotfix
+TAJO TAP FULLSTACK V10.0
+Smart Page Premium / BUSINESS Operator / Mobile Activation Fix

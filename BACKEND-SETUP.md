@@ -311,3 +311,21 @@ TAJO_WIFI_ENCRYPTION_KEY=<segredo forte e estável com pelo menos 32 caracteres>
 Ela é usada somente pelo servidor para cifrar/decifrar a senha Wi‑Fi via AES‑256‑GCM. Nunca exponha essa variável no frontend ou GitHub.
 
 Depois de adicioná-la em Production, faça um novo deployment e confira `/api/health`. O campo `wifiConnect` deve ser `ready`.
+
+---
+
+## V8.0 — Operadores TAJO TAP BUSINESS
+
+Se o banco já está na V7.1, execute somente:
+
+```text
+supabase/migrations/011_v8_business_operator.sql
+```
+
+Depois execute:
+
+```text
+supabase/VERIFY_V8.sql
+```
+
+A V8 cria `tap_business_operators` e adiciona `operator_id` a clientes, plaquinhas/QRs e Smart Pages. O backend aplica isolamento por operador e cotas de uso. Consulte `V8-INSTALACAO.md` para o provisionamento e teste funcional.

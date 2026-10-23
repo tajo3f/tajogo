@@ -1,7 +1,7 @@
 {
-  "name": "TAJO TAP",
+  "name": "TAJO TAP BUSINESS",
   "short_name": "TAJO TAP",
-  "description": "Gestão de plaquinhas NFC e QR Code dinâmico.",
+  "description": "Operação profissional de QR Code dinâmico, bio-sites e plaquinhas inteligentes.",
   "start_url": "./#/login",
   "display": "standalone",
   "background_color": "#f4f6f2",

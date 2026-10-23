@@ -78,6 +78,14 @@
       "destination": "/api/index?route=admin/operations"
     },
     {
+      "source": "/api/operator/hub",
+      "destination": "/api/index?route=operator/hub"
+    },
+    {
+      "source": "/api/admin/operators",
+      "destination": "/api/index?route=admin/operators"
+    },
+    {
       "source": "/api/resolve",
       "destination": "/api/index?route=resolve"
     },
