@@ -1,4 +1,4 @@
-/* TAJO TAP Frontend + Backend V7
+/* TAJO TAP Frontend + Backend V8
  * Production-oriented SPA connected to Vercel Functions + Supabase.
  * Sensitive Supabase keys stay server-side; browser talks only to same-origin /api routes.
  */
@@ -61,6 +61,7 @@
     plaques: [],
     clients: [],
     sellers: [],
+    operators: [],
     adminSales: [],
     smartPages: [],
     batches: [],
@@ -68,6 +69,7 @@
     lastBatch: null,
     selectedPlateCodes: [],
     sellerData: { seller:null, metrics:{}, leads:[], sales:[], lots:[], messages:[] },
+    operatorData: { operator:null, access:'', metrics:{}, clients:[], qrs:[], smartPages:[] },
     operations: { metrics:{}, decisions:[], details:{} },
     chatTimer: null,
     sidebarOpen: false,
@@ -128,6 +130,13 @@
     state.sellerData = { ...state.sellerData, ...result };
     state.plaques = []; state.clients = [];
   }
+
+  async function loadOperatorData() {
+    const result = await apiFetch('/api/operator/hub');
+    state.operatorData = { ...state.operatorData, ...result };
+    state.plaques = Array.isArray(result.qrs) ? result.qrs : [];
+    state.clients = Array.isArray(result.clients) ? result.clients : [];
+  }
   async function loadSmartPages() {
     try {
       const result = await apiFetch('/api/smart-pages');
@@ -141,6 +150,11 @@
     const result = await apiFetch('/api/admin/sellers');
     state.sellers = Array.isArray(result.sellers) ? result.sellers : [];
     state.adminSales = Array.isArray(result.sales) ? result.sales : [];
+  }
+
+  async function loadOperatorsAdmin() {
+    const result = await apiFetch('/api/admin/operators');
+    state.operators = Array.isArray(result.operators) ? result.operators : [];
   }
   async function loadProductionData() {
     try {
@@ -157,9 +171,13 @@
     catch(error){ console.warn('[operations]',error); state.operations={metrics:{},decisions:[],details:{}}; }
   }
   async function refreshRoleData() {
-    if (state.role === 'admin') return Promise.all([loadAdminData(), loadSellersAdmin(), loadProductionData(), loadOperations(), loadSmartPages()]);
+    if (state.role === 'admin') return Promise.all([loadAdminData(), loadSellersAdmin(), loadOperatorsAdmin(), loadProductionData(), loadOperations(), loadSmartPages()]);
     if (state.role === 'client') return Promise.all([loadClientData(), loadSmartPages()]);
     if (state.role === 'seller') return Promise.all([loadSellerData(), loadSmartPages()]);
+    if (state.role === 'operator') {
+      if (state.operatorData.access && state.operatorData.access !== 'active') return Promise.resolve();
+      return Promise.all([loadOperatorData(), loadSmartPages()]);
+    }
   }
 
   async function bootstrap() {
@@ -168,8 +186,9 @@
       if (session.authenticated) {
         state.user = session.user || null;
         state.sessionRole = session.role || 'unassigned';
-        if (session.role === 'admin' || session.role === 'client' || session.role === 'seller') {
+        if (session.role === 'admin' || session.role === 'client' || session.role === 'seller' || session.role === 'operator') {
           state.role = session.role;
+          if (session.role === 'operator') state.operatorData = { ...state.operatorData, operator: session.operator || null, access: session.operatorAccess || '' };
           await refreshRoleData();
         }
       }
@@ -239,6 +258,7 @@
       return renderPortal();
     }
     if (state.role === 'seller') return renderSellerApp(r);
+    if (state.role === 'operator') return renderOperatorApp(r);
     if (r.name === 'portal') return go('dashboard');
     app.innerHTML = shell(renderPage(r), r.name);
     bindPageEnhancements(r);
@@ -246,14 +266,14 @@
   }
 
   function renderLoading() {
-    app.innerHTML = `<main class="auth-shell"><section class="auth-brand" aria-label="TAJO TAP"><img class="auth-brand-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"><div class="auth-copy"><div class="auth-kicker">Conectando</div><h1>Preparando sua central.</h1><p>Validando sua sessão e sincronizando as plaquinhas com o backend TAJO TAP.</p></div></section><section class="auth-panel"><div class="auth-card"><div class="eyebrow">Aguarde</div><h2>Carregando dados...</h2><p>A conexão segura com o Supabase está sendo verificada.</p></div></section></main>`;
+    app.innerHTML = `<main class="auth-shell"><section class="auth-brand" aria-label="TAJO TAP BUSINESS"><img class="auth-brand-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP BUSINESS"><div class="auth-copy"><div class="auth-kicker">Conectando</div><h1>Preparando sua central.</h1><p>Validando sua sessão e sincronizando as plaquinhas com o backend TAJO TAP.</p></div></section><section class="auth-panel"><div class="auth-card"><div class="eyebrow">Aguarde</div><h2>Carregando dados...</h2><p>A conexão segura com o Supabase está sendo verificada.</p></div></section></main>`;
   }
 
   function renderLogin() {
     app.innerHTML = `
       <main class="auth-shell">
-        <section class="auth-brand" aria-label="TAJO TAP">
-          <img class="auth-brand-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP">
+        <section class="auth-brand" aria-label="TAJO TAP BUSINESS">
+          <img class="auth-brand-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP BUSINESS">
           <div class="auth-copy">
             <div class="auth-kicker">Plaquinhas inteligentes</div>
             <h1>Um toque. Um destino. Controle total.</h1>
@@ -264,9 +284,9 @@
         </section>
         <section class="auth-panel">
           <div class="auth-card">
-            <img class="auth-mobile-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP">
+            <img class="auth-mobile-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP BUSINESS">
             <div class="eyebrow">Acesso seguro</div>
-            <h2>Bem-vindo ao TAJO TAP</h2>
+            <h2>Bem-vindo ao TAJO TAP BUSINESS</h2>
             <p>Entre para gerenciar plaquinhas, clientes e direcionamentos.</p>
             <form id="login-form" class="stack" novalidate>
               <div class="field"><label for="email">E-mail</label><input class="input" id="email" name="email" type="email" autocomplete="email" placeholder="seuemail@empresa.com.br" required></div>
@@ -290,6 +310,7 @@
       ['analytics','analytics','Analytics'],
       ['sales','sales','Vendas'],
       ['sellers','clients','Vendedores'],
+      ['operators','clients','Operadores BUSINESS'],
       ['team-chat','bell','Chat da equipe'],
       ['settings','settings','Configurações']
     ];
@@ -297,7 +318,7 @@
     return `
       <div class="app-shell">
         <aside class="sidebar ${state.sidebarOpen ? 'open':''}" id="sidebar">
-          <div class="sidebar-logo"><img src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"></div>
+          <div class="sidebar-logo"><img src="assets/images/tajo-tap-logo.png" alt="TAJO TAP BUSINESS"></div>
           <div class="sidebar-context"><img class="context-mark" src="assets/images/tajo-tap-mark.png" alt=""><div class="context-copy"><strong>TAJO TAP</strong><span>Administração</span></div>${ICONS.chevron}</div>
           <nav class="nav-group" aria-label="Navegação principal"><div class="nav-label">Operação</div>${navHtml}</nav>
           <div class="sidebar-spacer"></div>
@@ -309,8 +330,8 @@
         <div class="app-main">
           <header class="topbar">
             <button class="btn btn-icon btn-ghost mobile-menu-btn" data-action="toggle-sidebar" aria-label="Abrir menu">${ICONS.menu}</button>
-            <a class="mobile-brand" href="#/dashboard"><img src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"></a>
-            <div class="topbar-title"><strong>Central TAJO TAP</strong><span>Controle seus pontos de contato</span></div>
+            <a class="mobile-brand" href="#/dashboard"><img src="assets/images/tajo-tap-logo.png" alt="TAJO TAP BUSINESS"></a>
+            <div class="topbar-title"><strong>Central TAJO TAP BUSINESS</strong><span>Controle seus pontos de contato</span></div>
             <div class="topbar-search input-with-icon">${ICONS.search}<input class="input" id="global-search" placeholder="Buscar placa, cliente ou código" aria-label="Busca global"></div>
             <div class="topbar-actions">
               <button class="btn btn-ghost" data-action="open-scanner">${ICONS.scan}<span class="scan-label">Escanear</span></button>
@@ -338,7 +359,7 @@
   function sellerShell(content, active){
     const nav=[['seller-dashboard','dashboard','Visão geral'],['seller-lots','printer','Meus lotes'],['seller-smart','globe','Smart Pages'],['seller-leads','target','Meus leads'],['seller-sales','sales','Minhas vendas'],['sales','sales','Playbook'],['team-chat','bell','Chat da equipe'],['seller-settings','settings','Minha conta']];
     const navHtml=nav.map(([path,icon,label])=>`<a class="nav-item ${active===path?'active':''}" href="#/${path}">${ICONS[icon]}<span>${label}</span></a>`).join('');
-    return `<div class="app-shell seller-shell"><aside class="sidebar ${state.sidebarOpen?'open':''}"><div class="sidebar-logo"><img src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"></div><div class="sidebar-context"><img class="context-mark" src="assets/images/tajo-tap-mark.png" alt=""><div class="context-copy"><strong>TAJO TAP</strong><span>Equipe comercial</span></div></div><nav class="nav-group"><div class="nav-label">Meu trabalho</div>${navHtml}</nav><div class="sidebar-spacer"></div><div class="sidebar-user"><div class="avatar">${esc(userInitials())}</div><div class="meta"><strong>${esc(state.sellerData.seller?.full_name||state.user?.name||'Vendedor')}</strong><span>Vendedor TAJO</span></div></div><button class="sidebar-logout" data-action="logout">${ICONS.logout}<span>Sair da conta</span></button></aside><div class="drawer-backdrop ${state.sidebarOpen?'show':''}" data-action="close-sidebar"></div><div class="app-main"><header class="topbar"><button class="btn btn-icon btn-ghost mobile-menu-btn" data-action="toggle-sidebar">${ICONS.menu}</button><a class="mobile-brand" href="#/seller-dashboard"><img src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"></a><div class="topbar-title"><strong>Central Comercial</strong><span>Seus dados, suas vendas, sua evolução</span></div><div class="topbar-actions"><button class="btn btn-icon btn-ghost" data-action="theme">${state.theme==='dark'?ICONS.sun:ICONS.moon}</button></div></header><main class="content">${content}<footer class="system-credit">Sistema desenvolvido por <strong>João Paulo Brandão</strong></footer></main></div><nav class="mobile-bottom-nav"><a class="${active==='seller-dashboard'?'active':''}" href="#/seller-dashboard">${ICONS.dashboard}<span>Início</span></a><a class="${active==='seller-lots'?'active':''}" href="#/seller-lots">${ICONS.printer}<span>Lotes</span></a><a class="${active==='seller-leads'?'active':''}" href="#/seller-leads">${ICONS.target}<span>Leads</span></a><a class="${active==='seller-sales'?'active':''}" href="#/seller-sales">${ICONS.sales}<span>Vendas</span></a><a class="${active==='team-chat'?'active':''}" href="#/team-chat">${ICONS.bell}<span>Chat</span></a></nav></div>`;
+    return `<div class="app-shell seller-shell"><aside class="sidebar ${state.sidebarOpen?'open':''}"><div class="sidebar-logo"><img src="assets/images/tajo-tap-logo.png" alt="TAJO TAP BUSINESS"></div><div class="sidebar-context"><img class="context-mark" src="assets/images/tajo-tap-mark.png" alt=""><div class="context-copy"><strong>TAJO TAP</strong><span>Equipe comercial</span></div></div><nav class="nav-group"><div class="nav-label">Meu trabalho</div>${navHtml}</nav><div class="sidebar-spacer"></div><div class="sidebar-user"><div class="avatar">${esc(userInitials())}</div><div class="meta"><strong>${esc(state.sellerData.seller?.full_name||state.user?.name||'Vendedor')}</strong><span>Vendedor TAJO</span></div></div><button class="sidebar-logout" data-action="logout">${ICONS.logout}<span>Sair da conta</span></button></aside><div class="drawer-backdrop ${state.sidebarOpen?'show':''}" data-action="close-sidebar"></div><div class="app-main"><header class="topbar"><button class="btn btn-icon btn-ghost mobile-menu-btn" data-action="toggle-sidebar">${ICONS.menu}</button><a class="mobile-brand" href="#/seller-dashboard"><img src="assets/images/tajo-tap-logo.png" alt="TAJO TAP BUSINESS"></a><div class="topbar-title"><strong>Central Comercial</strong><span>Seus dados, suas vendas, sua evolução</span></div><div class="topbar-actions"><button class="btn btn-icon btn-ghost" data-action="theme">${state.theme==='dark'?ICONS.sun:ICONS.moon}</button></div></header><main class="content">${content}<footer class="system-credit">Sistema desenvolvido por <strong>João Paulo Brandão</strong></footer></main></div><nav class="mobile-bottom-nav"><a class="${active==='seller-dashboard'?'active':''}" href="#/seller-dashboard">${ICONS.dashboard}<span>Início</span></a><a class="${active==='seller-lots'?'active':''}" href="#/seller-lots">${ICONS.printer}<span>Lotes</span></a><a class="${active==='seller-leads'?'active':''}" href="#/seller-leads">${ICONS.target}<span>Leads</span></a><a class="${active==='seller-sales'?'active':''}" href="#/seller-sales">${ICONS.sales}<span>Vendas</span></a><a class="${active==='team-chat'?'active':''}" href="#/team-chat">${ICONS.bell}<span>Chat</span></a></nav></div>`;
   }
 
   function renderSellerApp(r){
@@ -379,20 +400,22 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
   function smartPagesPage(context='Admin'){
     const pages=state.smartPages||[];
     const cards=pages.map(p=>`<article class="card smart-admin-card"><div class="smart-admin-cover" style="--smart:${esc(p.primaryColor||'#45E600')};background:${esc(p.backgroundColor||'#0B0D0E')}"><span>${ICONS.globe}</span><strong>${esc(p.businessName)}</strong><small>/bio/${esc(p.slug)}</small>${p.wifiMode&&p.wifiMode!=='off'?`<em class="smart-wifi-chip">${ICONS.wifi} ${p.wifiMode==='hybrid'?'Smart + Wi-Fi':'Wi-Fi Connect'}</em>`:''}</div><div class="card-pad"><div class="row-between"><div><div class="eyebrow">${p.isPublished?'PUBLICADA':'RASCUNHO'}</div><h3>${esc(p.businessName)}</h3></div><span class="badge ${p.isPublished?'badge-success':'badge-muted'}">${p.isPublished?'ONLINE':'OFF'}</span></div><div class="smart-stats"><span><b>${formatNumber(p.analytics?.views30d||0)}</b>Visualizações 30d</span><span><b>${formatNumber(p.analytics?.clicks30d||0)}</b>Cliques 30d</span></div><div class="row wrap"><button class="btn btn-primary btn-sm" data-action="edit-smart-page" data-id="${esc(p.id)}">${ICONS.edit} Editar</button><button class="btn btn-ghost btn-sm" data-action="copy" data-copy="${esc(p.publicUrl)}">${ICONS.copy} Copiar URL</button><a class="btn btn-ghost btn-sm" href="${esc(p.publicUrl)}" target="_blank" rel="noopener">Abrir ↗</a></div></div></article>`).join('');
-    const intro=context==='Vendedor'?'Edite apenas as Smart Pages ligadas às suas plaquinhas e clientes. Outros vendedores não aparecem aqui.':'Visualize e edite todas as Smart Pages da operação TAJO TAP.';
-    return `${pageHead('TAJO Smart Page','Páginas inteligentes dos clientes',intro)}<section class="smart-admin-grid">${cards||'<div class="card card-pad"><h2>Nenhuma Smart Page ainda</h2><p>Ao registrar uma venda com e-mail do cliente, a Smart Page é criada automaticamente e vinculada à plaquinha.</p></div>'}</section>`;
+    const intro=context==='Vendedor'?'Edite apenas as Smart Pages ligadas às suas plaquinhas e clientes. Outros vendedores não aparecem aqui.':context==='Operador'?'Crie e personalize bio-sites para os clientes da sua própria operação.':'Visualize e edite todas as Smart Pages da operação TAJO TAP.';
+    const actions=context==='Operador'?`<button class="btn btn-primary" data-action="operator-new-smart">${ICONS.plus} Criar bio-site</button>`:'';
+    const empty=context==='Operador'?'Crie um QR e depois vincule um bio-site profissional ao cliente.':'Ao registrar uma venda com e-mail do cliente, a Smart Page é criada automaticamente e vinculada à plaquinha.';
+    return `${pageHead('TAJO Smart Page','Páginas inteligentes dos clientes',intro,actions)}<section class="smart-admin-grid">${cards||`<div class="card card-pad"><h2>Nenhuma Smart Page ainda</h2><p>${empty}</p></div>`}</section>`;
   }
 
   function linesFromServices(items){ return (items||[]).map(x=>typeof x==='string'?x:`${x.label||''}${x.description?` | ${x.description}`:''}`).join('\n'); }
-  function linesFromLinks(items){ return (items||[]).map(x=>`${x.label||''}${x.url?` | ${x.url}`:''}`).join('\n'); }
+  function linesFromLinks(items){ return (items||[]).map(x=>`${x.label||''}${x.url?` | ${x.url}`:''}${x.description?` | ${x.description}`:''}`).join('\n'); }
   function parseServices(value){ return String(value||'').split(/\n+/).map(x=>x.trim()).filter(Boolean).slice(0,12).map(line=>{const [label,...rest]=line.split('|');return {label:label.trim(),description:rest.join('|').trim()};}); }
-  function parseLinks(value){ return String(value||'').split(/\n+/).map(x=>x.trim()).filter(Boolean).slice(0,12).map(line=>{const [label,...rest]=line.split('|');return {label:label.trim(),url:rest.join('|').trim()};}).filter(x=>x.label&&/^https:\/\//i.test(x.url)); }
+  function parseLinks(value){ return String(value||'').split(/\n+/).map(x=>x.trim()).filter(Boolean).slice(0,12).map(line=>{const parts=line.split('|').map(x=>x.trim());const label=parts.shift()||'';const url=parts.shift()||'';const description=parts.join(' | ').trim();return {label,url,...(description?{description}:{})};}).filter(x=>x.label&&/^https:\/\//i.test(x.url)); }
 
   function smartPageModal(id){
     const p=smartPageById(id); if(!p)return toast('Smart Page não encontrada');
     const wifiMode=p.wifiMode||'off';
     const wifiQr=p.wifiPayload?`<div class="wifi-admin-preview"><div><strong>QR Wi-Fi direto</strong><span>Este QR contém a rede e a senha. Use como segundo QR da plaquinha ou adesivo complementar.</span></div><div class="qr-frame wifi-admin-qr"><canvas class="qr-canvas" data-qr="${esc(p.wifiPayload)}" width="420" height="420"></canvas></div><div class="row wrap"><button type="button" class="btn btn-ghost" data-action="download-payload-qr" data-payload="${esc(p.wifiPayload)}" data-filename="TAJO-WIFI-${esc(p.slug)}.png">${ICONS.download} Baixar QR Wi-Fi</button><button type="button" class="btn btn-ghost" data-action="copy" data-copy="${esc(p.wifiPayload)}">${ICONS.copy} Copiar payload</button></div></div>`:'';
-    showModal(`<div class="modal-head"><div><div class="eyebrow">TAJO SMART PAGE · V7</div><h2>${esc(p.businessName)}</h2><p class="text-muted">${esc(p.publicUrl)}</p></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="smart-page-form" data-id="${esc(p.id)}"><div class="modal-body smart-editor-grid"><section class="stack"><div class="editor-section-title"><strong>Identidade</strong><span>O que o visitante vê primeiro.</span></div><div class="field"><label>Nome do negócio</label><input class="input" name="business_name" maxlength="120" required value="${esc(p.businessName)}"></div><div class="field"><label>Endereço público</label><div class="input-prefix"><span>/bio/</span><input class="input" name="slug" value="${esc(p.slug)}" pattern="[a-z0-9-]{3,63}" required></div></div><div class="field"><label>Subtítulo</label><input class="input" name="subtitle" maxlength="320" value="${esc(p.subtitle)}"></div><div class="field"><label>Descrição</label><textarea class="input" name="bio" rows="4" maxlength="1200">${esc(p.bio)}</textarea></div><div class="form-grid"><div class="field"><label>Logo (URL HTTPS)</label><input class="input" name="logo_url" value="${esc(p.logoUrl)}" placeholder="https://..."></div><div class="field"><label>Capa (URL HTTPS)</label><input class="input" name="cover_url" value="${esc(p.coverUrl)}" placeholder="https://..."></div></div><div class="form-grid smart-color-grid"><div class="field"><label>Cor principal</label><input class="input color-input" type="color" name="primary_color" value="${esc(p.primaryColor)}"></div><div class="field"><label>Fundo</label><input class="input color-input" type="color" name="background_color" value="${esc(p.backgroundColor)}"></div><div class="field"><label>Texto</label><input class="input color-input" type="color" name="text_color" value="${esc(p.textColor)}"></div></div><div class="field"><label>Estilo dos botões</label><select class="select" name="button_style"><option value="rounded" ${p.buttonStyle==='rounded'?'selected':''}>Moderno arredondado</option><option value="pill" ${p.buttonStyle==='pill'?'selected':''}>Pílula</option><option value="square" ${p.buttonStyle==='square'?'selected':''}>Quadrado</option></select></div><div class="editor-section-title"><strong>Wi-Fi Connect</strong><span>Smart Page + QR Wi-Fi direto, sem misturar os dois códigos.</span></div><div class="field"><label>Modo Wi-Fi</label><select class="select" name="wifi_mode"><option value="off" ${wifiMode==='off'?'selected':''}>Desativado</option><option value="wifi" ${wifiMode==='wifi'?'selected':''}>Página focada em Wi-Fi + QR direto</option><option value="hybrid" ${wifiMode==='hybrid'?'selected':''}>Smart Page + Wi-Fi direto (recomendado)</option></select></div><div class="form-grid"><div class="field"><label>Nome da rede (SSID)</label><input class="input" name="wifi_ssid" maxlength="32" value="${esc(p.wifiSsid||'')}"></div><div class="field"><label>Segurança</label><select class="select" name="wifi_security"><option value="WPA" ${p.wifiSecurity==='WPA'?'selected':''}>WPA / WPA2 / WPA3</option><option value="WEP" ${p.wifiSecurity==='WEP'?'selected':''}>WEP</option><option value="nopass" ${p.wifiSecurity==='nopass'?'selected':''}>Rede aberta</option></select></div></div><div class="form-grid"><div class="field"><label>Senha do Wi-Fi</label><input class="input" type="password" name="wifi_password" value="${esc(p.wifiPassword||'')}" autocomplete="new-password"><span class="field-help">A V7 cifra a senha antes de gravar no Supabase. Para redes WPA, use 8 a 63 caracteres.</span></div><div class="field"><label>Nome exibido</label><input class="input" name="wifi_label" maxlength="80" value="${esc(p.wifiLabel||'Wi-Fi do estabelecimento')}"></div></div><div class="form-grid"><label class="check-line"><input type="checkbox" name="wifi_hidden" ${p.wifiHidden?'checked':''}> Rede oculta</label><label class="check-line"><input type="checkbox" name="wifi_public_enabled" ${p.wifiPublicEnabled?'checked':''}> Mostrar Wi-Fi na página</label><label class="check-line"><input type="checkbox" name="wifi_direct_qr_enabled" ${p.wifiDirectQrEnabled?'checked':''}> Gerar QR Wi-Fi direto</label></div>${wifiQr}</section><section class="stack"><div class="editor-section-title"><strong>Links e contato</strong><span>Os principais atalhos do cliente.</span></div><div class="form-grid"><div class="field"><label>WhatsApp</label><input class="input" name="whatsapp" value="${esc(p.whatsapp)}"></div><div class="field"><label>Telefone</label><input class="input" name="phone" value="${esc(p.phone)}"></div><div class="field"><label>Instagram</label><input class="input" name="instagram" value="${esc(p.instagram)}"></div><div class="field"><label>TikTok</label><input class="input" name="tiktok" value="${esc(p.tiktok)}"></div><div class="field"><label>E-mail público</label><input class="input" type="email" name="public_email" value="${esc(p.publicEmail)}"></div><div class="field"><label>Site</label><input class="input" name="website_url" value="${esc(p.websiteUrl)}"></div><div class="field"><label>Localização</label><input class="input" name="maps_url" value="${esc(p.mapsUrl)}"></div><div class="field"><label>Avaliação Google</label><input class="input" name="google_review_url" value="${esc(p.googleReviewUrl)}"></div></div><div class="form-grid"><div class="field"><label>Chave Pix</label><input class="input" name="pix_key" value="${esc(p.pixKey)}"></div><div class="field"><label>Horário</label><input class="input" name="opening_hours" value="${esc(p.openingHours)}"></div></div><div class="field"><label>Endereço</label><input class="input" name="address" value="${esc(p.address)}"></div><div class="field"><label>Serviços — um por linha</label><textarea class="input" rows="4" name="services">${esc(linesFromServices(p.services))}</textarea></div><div class="field"><label>Links extras — Rótulo | URL</label><textarea class="input" rows="4" name="custom_links">${esc(linesFromLinks(p.customLinks))}</textarea></div><label class="check-line"><input type="checkbox" name="is_published" ${p.isPublished?'checked':''}> Página publicada</label>${state.role==='admin'?`<label class="check-line"><input type="checkbox" name="seller_edit_allowed" ${p.sellerEditAllowed?'checked':''}> Permitir que o vendedor responsável edite esta Smart Page</label>`:''}</section></div><div class="modal-footer smart-editor-footer"><a class="btn btn-ghost" href="${esc(p.publicUrl)}" target="_blank" rel="noopener">Pré-visualizar ↗</a><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar Smart Page</button></div></form>`,true);
+    showModal(`<div class="modal-head"><div><div class="eyebrow">TAJO SMART PAGE · V10</div><h2>${esc(p.businessName)}</h2><p class="text-muted">${esc(p.publicUrl)}</p></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="smart-page-form" data-id="${esc(p.id)}"><div class="modal-body smart-editor-grid"><section class="stack"><div class="editor-section-title"><strong>Identidade</strong><span>O que o visitante vê primeiro.</span></div><div class="field"><label>Nome do negócio</label><input class="input" name="business_name" maxlength="120" required value="${esc(p.businessName)}"></div><div class="field"><label>Endereço público</label><div class="input-prefix"><span>/bio/</span><input class="input" name="slug" value="${esc(p.slug)}" pattern="[a-z0-9-]{3,63}" required></div></div><div class="field"><label>Subtítulo</label><input class="input" name="subtitle" maxlength="320" value="${esc(p.subtitle)}"></div><div class="field"><label>Descrição</label><textarea class="input" name="bio" rows="4" maxlength="1200">${esc(p.bio)}</textarea></div><div class="form-grid"><div class="field"><label>Logo (URL HTTPS)</label><input class="input" name="logo_url" value="${esc(p.logoUrl)}" placeholder="https://..."></div><div class="field"><label>Capa (URL HTTPS)</label><input class="input" name="cover_url" value="${esc(p.coverUrl)}" placeholder="https://..."></div></div><div class="form-grid smart-color-grid"><div class="field"><label>Cor principal</label><input class="input color-input" type="color" name="primary_color" value="${esc(p.primaryColor)}"></div><div class="field"><label>Fundo</label><input class="input color-input" type="color" name="background_color" value="${esc(p.backgroundColor)}"></div><div class="field"><label>Texto</label><input class="input color-input" type="color" name="text_color" value="${esc(p.textColor)}"></div></div><div class="field"><label>Estilo dos botões</label><select class="select" name="button_style"><option value="rounded" ${p.buttonStyle==='rounded'?'selected':''}>Moderno arredondado</option><option value="pill" ${p.buttonStyle==='pill'?'selected':''}>Pílula</option><option value="square" ${p.buttonStyle==='square'?'selected':''}>Quadrado</option></select></div><div class="editor-section-title"><strong>Wi-Fi Connect</strong><span>Smart Page + QR Wi-Fi direto, sem misturar os dois códigos.</span></div><div class="field"><label>Modo Wi-Fi</label><select class="select" name="wifi_mode"><option value="off" ${wifiMode==='off'?'selected':''}>Desativado</option><option value="wifi" ${wifiMode==='wifi'?'selected':''}>Página focada em Wi-Fi + QR direto</option><option value="hybrid" ${wifiMode==='hybrid'?'selected':''}>Smart Page + Wi-Fi direto (recomendado)</option></select></div><div class="form-grid"><div class="field"><label>Nome da rede (SSID)</label><input class="input" name="wifi_ssid" maxlength="32" value="${esc(p.wifiSsid||'')}"></div><div class="field"><label>Segurança</label><select class="select" name="wifi_security"><option value="WPA" ${p.wifiSecurity==='WPA'?'selected':''}>WPA / WPA2 / WPA3</option><option value="WEP" ${p.wifiSecurity==='WEP'?'selected':''}>WEP</option><option value="nopass" ${p.wifiSecurity==='nopass'?'selected':''}>Rede aberta</option></select></div></div><div class="form-grid"><div class="field"><label>Senha do Wi-Fi</label><input class="input" type="password" name="wifi_password" value="${esc(p.wifiPassword||'')}" autocomplete="new-password"><span class="field-help">A V10 cifra a senha antes de gravar no Supabase. Para redes WPA, use 8 a 63 caracteres.</span></div><div class="field"><label>Nome exibido</label><input class="input" name="wifi_label" maxlength="80" value="${esc(p.wifiLabel||'Wi-Fi do estabelecimento')}"></div></div><div class="form-grid"><label class="check-line"><input type="checkbox" name="wifi_hidden" ${p.wifiHidden?'checked':''}> Rede oculta</label><label class="check-line"><input type="checkbox" name="wifi_public_enabled" ${p.wifiPublicEnabled?'checked':''}> Mostrar Wi-Fi na página</label><label class="check-line"><input type="checkbox" name="wifi_direct_qr_enabled" ${p.wifiDirectQrEnabled?'checked':''}> Gerar QR Wi-Fi direto</label></div>${wifiQr}</section><section class="stack"><div class="editor-section-title"><strong>Links e contato</strong><span>Os principais atalhos do cliente.</span></div><div class="form-grid"><div class="field"><label>WhatsApp</label><input class="input" name="whatsapp" value="${esc(p.whatsapp)}"></div><div class="field"><label>Telefone</label><input class="input" name="phone" value="${esc(p.phone)}"></div><div class="field"><label>Instagram</label><input class="input" name="instagram" value="${esc(p.instagram)}"></div><div class="field"><label>TikTok</label><input class="input" name="tiktok" value="${esc(p.tiktok)}"></div><div class="field"><label>E-mail público</label><input class="input" type="email" name="public_email" value="${esc(p.publicEmail)}"></div><div class="field"><label>Site</label><input class="input" name="website_url" value="${esc(p.websiteUrl)}"></div><div class="field"><label>Localização</label><input class="input" name="maps_url" value="${esc(p.mapsUrl)}"></div><div class="field"><label>Avaliação Google</label><input class="input" name="google_review_url" value="${esc(p.googleReviewUrl)}"></div></div><div class="form-grid"><div class="field"><label>Chave Pix</label><input class="input" name="pix_key" value="${esc(p.pixKey)}"></div><div class="field"><label>Horário</label><input class="input" name="opening_hours" value="${esc(p.openingHours)}"></div></div><div class="field"><label>Endereço</label><input class="input" name="address" value="${esc(p.address)}"></div><div class="field"><label>Serviços — Nome | Descrição</label><textarea class="input" rows="5" name="services" placeholder="Revisão completa | Freios, suspensão e alinhamento">${esc(linesFromServices(p.services))}</textarea><span class="field-help">Os primeiros serviços viram chips no topo e a lista completa aparece mais abaixo na Smart Page.</span></div><div class="field"><label>Links extras — Rótulo | URL | Descrição</label><textarea class="input" rows="5" name="custom_links" placeholder="Ver catálogo | https://... | Conheça nossa coleção">${esc(linesFromLinks(p.customLinks))}</textarea><span class="field-help">Na V10, a descrição aparece abaixo do título do botão. Ex.: Ver catálogo | https://... | Conheça nossa coleção.</span></div><label class="check-line"><input type="checkbox" name="is_published" ${p.isPublished?'checked':''}> Página publicada</label>${state.role==='admin'?`<label class="check-line"><input type="checkbox" name="seller_edit_allowed" ${p.sellerEditAllowed?'checked':''}> Permitir que o vendedor responsável edite esta Smart Page</label>`:''}</section></div><div class="modal-footer smart-editor-footer"><a class="btn btn-ghost" href="${esc(p.publicUrl)}" target="_blank" rel="noopener">Pré-visualizar ↗</a><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar Smart Page</button></div></form>`,true);
     renderQRCodes();
   }
 
@@ -448,6 +471,83 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
   function sellerLeadsPage(){ const leads=state.sellerData.leads||[]; return `${pageHead('CRM individual','Meus leads','Somente você e a administração TAJO podem visualizar sua carteira.',`<button class="btn btn-primary" data-action="new-seller-lead">${ICONS.plus} Novo lead</button>`)}<div class="card table-card"><div class="responsive-table"><table><thead><tr><th>Negócio</th><th>Contato</th><th>Cidade</th><th>Status</th><th>Próximo contato</th></tr></thead><tbody>${leads.map(l=>`<tr><td><strong>${esc(l.business_name)}</strong><small>${esc(l.niche||'')}</small></td><td>${esc(l.contact_name||'—')}<small>${esc(l.phone||'')}</small></td><td>${esc(l.city||'—')}</td><td><select class="select seller-lead-status" data-id="${esc(l.id)}">${['novo','contatado','respondeu','negociacao','proposta','fechado','perdido'].map(x=>`<option ${l.status===x?'selected':''} value="${x}">${x}</option>`).join('')}</select></td><td>${l.next_contact_at?new Date(l.next_contact_at).toLocaleString('pt-BR'):'—'}</td></tr>`).join('')||'<tr><td colspan="5">Nenhum lead cadastrado.</td></tr>'}</tbody></table></div></div>`; }
   function sellerSalesPage(){ const sales=state.sellerData.sales||[]; return `${pageHead('Resultados individuais','Minhas vendas','Cada venda usa uma plaquinha do seu estoque e vincula o cliente pelo e-mail informado.',`<button class="btn btn-primary" data-action="new-seller-sale">${ICONS.plus} Registrar venda</button>`)}<div class="card table-card"><div class="responsive-table"><table><thead><tr><th>Cliente</th><th>E-mail / painel</th><th>Venda</th><th>Comissão</th><th>Status</th><th>Data</th></tr></thead><tbody>${sales.map(x=>`<tr><td><strong>${esc(x.customer_name)}</strong></td><td>${esc(x.customer_email||'—')}</td><td>${brl(x.amount_cents)}</td><td>${brl(x.commission_cents)} <small>${x.commission_rate}%</small></td><td><span class="badge">${esc(x.status)}</span></td><td>${new Date(x.sold_at).toLocaleDateString('pt-BR')}</td></tr>`).join('')||'<tr><td colspan="6">Nenhuma venda registrada.</td></tr>'}</tbody></table></div></div>`; }
   function sellerSettingsPage(){ return `${pageHead('Minha conta','Perfil comercial','Seus dados de acesso e sua regra de comissão.') }<div class="card card-pad settings-card"><div class="settings-row"><div><strong>${esc(state.sellerData.seller?.full_name||state.user?.name||'Vendedor')}</strong><span>${esc(state.user?.email||'')}</span></div><span class="badge badge-success">VENDEDOR ATIVO</span></div><div class="settings-row"><div><strong>Comissão configurada</strong><span>Definida pela administração TAJO</span></div><strong>${esc(state.sellerData.seller?.commission_rate||0)}%</strong></div><button class="btn btn-danger" data-action="logout">${ICONS.logout} Sair da conta</button></div>`; }
+
+  function operatorShell(content, active){
+    const nav=[['operator-dashboard','dashboard','Visão geral'],['operator-qrs','plate','QR Dinâmicos'],['operator-clients','clients','Clientes'],['operator-smart','globe','Bio-sites'],['sales','sales','Playbook de vendas'],['operator-settings','settings','Minha licença']];
+    const navHtml=nav.map(([path,icon,label])=>`<a class="nav-item ${active===path?'active':''}" href="#/${path}">${ICONS[icon]}<span>${label}</span></a>`).join('');
+    const op=state.operatorData.operator||{};
+    return `<div class="app-shell operator-shell"><aside class="sidebar ${state.sidebarOpen?'open':''}"><div class="sidebar-logo"><img src="assets/images/tajo-tap-logo.png" alt="TAJO TAP BUSINESS"></div><div class="sidebar-context"><img class="context-mark" src="assets/images/tajo-tap-mark.png" alt=""><div class="context-copy"><strong>${esc(op.brand_name||'TAJO TAP BUSINESS')}</strong><span>Operação licenciada</span></div></div><nav class="nav-group"><div class="nav-label">Minha operação</div>${navHtml}</nav><div class="sidebar-spacer"></div><div class="sidebar-help"><strong>Modelo comercial</strong><p>Crie QR Codes, bio-sites e gerencie sua própria carteira de clientes.</p><a class="btn btn-soft btn-sm" href="#/sales">${ICONS.sales} Abrir playbook</a></div><div class="sidebar-user"><div class="avatar">${esc(userInitials())}</div><div class="meta"><strong>${esc(state.user?.name||op.brand_name||'Operador')}</strong><span>TAJO TAP BUSINESS</span></div></div><button class="sidebar-logout" data-action="logout">${ICONS.logout}<span>Sair da conta</span></button></aside><div class="drawer-backdrop ${state.sidebarOpen?'show':''}" data-action="close-sidebar"></div><div class="app-main"><header class="topbar"><button class="btn btn-icon btn-ghost mobile-menu-btn" data-action="toggle-sidebar">${ICONS.menu}</button><a class="mobile-brand" href="#/operator-dashboard"><img src="assets/images/tajo-tap-logo.png" alt="TAJO TAP BUSINESS"></a><div class="topbar-title"><strong>Minha Operação</strong><span>${esc(op.brand_name||'TAJO TAP BUSINESS')}</span></div><div class="topbar-actions"><button class="btn btn-icon btn-ghost" data-action="theme">${state.theme==='dark'?ICONS.sun:ICONS.moon}</button></div></header><main class="content">${content}<footer class="system-credit">Tecnologia TAJO TAP · Sistema desenvolvido por <strong>João Paulo Brandão</strong></footer></main></div><nav class="mobile-bottom-nav"><a class="${active==='operator-dashboard'?'active':''}" href="#/operator-dashboard">${ICONS.dashboard}<span>Início</span></a><a class="${active==='operator-qrs'?'active':''}" href="#/operator-qrs">${ICONS.plate}<span>QRs</span></a><a class="${active==='operator-clients'?'active':''}" href="#/operator-clients">${ICONS.clients}<span>Clientes</span></a><a class="${active==='operator-smart'?'active':''}" href="#/operator-smart">${ICONS.globe}<span>Bio-sites</span></a><a class="${active==='sales'?'active':''}" href="#/sales">${ICONS.sales}<span>Vendas</span></a></nav></div>`;
+  }
+
+  function renderOperatorApp(r){
+    if(state.operatorData.access && state.operatorData.access!=='active'){
+      app.innerHTML=operatorShell(operatorLicenseBlockedPage(), 'operator-settings');
+      bindPageEnhancements(r);
+      return;
+    }
+    const allowed=new Set(['operator-dashboard','operator-qrs','operator-clients','operator-smart','operator-settings','sales']);
+    if(r.name==='dashboard'||!allowed.has(r.name)) return go('operator-dashboard');
+    const content=r.name==='operator-dashboard'?operatorDashboardPage():r.name==='operator-qrs'?operatorQrsPage():r.name==='operator-clients'?operatorClientsPage():r.name==='operator-smart'?smartPagesPage('Operador'):r.name==='sales'?salesPage():operatorSettingsPage();
+    app.innerHTML=operatorShell(content,r.name); bindPageEnhancements(r);
+  }
+
+  function operatorDashboardPage(){
+    const m=state.operatorData.metrics||{}, op=state.operatorData.operator||{};
+    const expires=op.license_ends_at?new Date(op.license_ends_at).toLocaleDateString('pt-BR'):'Sem vencimento definido';
+    const qrLimit=Number(op.qr_limit||0), clientLimit=Number(op.client_limit||0), smartLimit=Number(op.smart_page_limit||0);
+    return `${pageHead('TAJO TAP BUSINESS','Sua operação de QR Code Dinâmico','Aqui você gerencia a carteira que está construindo: clientes, QR Codes permanentes, destinos e bio-sites.',`<button class="btn btn-primary" data-action="operator-new-qr">${ICONS.plus} Criar QR Dinâmico</button>`)}
+      <section class="metric-grid">${metric('QR Codes',`${m.qrs||0}/${qrLimit}`,`${Math.max(0,qrLimit-(m.qrs||0))} disponíveis`,'plate')}${metric('Clientes',`${m.clients||0}/${clientLimit}`,`${Math.max(0,clientLimit-(m.clients||0))} disponíveis`,'clients')}${metric('Bio-sites',`${m.smartPages||0}/${smartLimit}`,`${Math.max(0,smartLimit-(m.smartPages||0))} disponíveis`,'globe')}${metric('Acessos no mês',formatNumber(m.scansMonth||0),'Todos os seus QR Codes','analytics')}</section>
+      <section class="dashboard-grid"><div class="card card-pad"><div class="card-title"><div><h2>Comece pelo fluxo simples</h2><p>Cliente → QR → destino → demonstração → venda.</p></div></div><div class="quick-actions">${quick('Cadastrar cliente','Organize a empresa antes de criar os acessos.','clients','operator-new-client')}${quick('Criar QR Dinâmico','Gere um código permanente e configure o primeiro destino.','plate','operator-new-qr')}${quick('Criar bio-site','Centralize WhatsApp, Instagram, Google e outros links.','globe','operator-new-smart')}${quick('Abrir playbook','Use scripts, objeções e estratégias de venda.','sales','go-operator-sales')}</div></div><div class="card card-pad"><div class="card-title"><div><h2>Licença operacional</h2><p>O software continua sendo TAJO TAP; sua licença permite usar a plataforma para atender sua carteira.</p></div><span class="badge badge-success">${esc(String(op.plan||'business').toUpperCase())}</span></div><div class="settings-row"><div><strong>Validade</strong><span>Período contratado</span></div><strong>${esc(expires)}</strong></div><div class="settings-row"><div><strong>Marca da operação</strong><span>Identificação interna</span></div><strong>${esc(op.brand_name||'—')}</strong></div></div></section>`;
+  }
+
+  function operatorQrsPage(){
+    const rows=(state.plaques||[]).map(p=>{const smart=smartPageForPlateCode(p.code);return `<tr><td><strong class="mono">${esc(p.code)}</strong><small>${p.assetKind==='smart_plate'?'Plaquinha inteligente':'QR Dinâmico'}</small></td><td><strong>${esc(p.name)}</strong><small>${esc(p.client)}</small></td><td><span class="badge ${p.status==='active'?'badge-success':p.status==='paused'?'badge-warning':'badge-muted'}">${esc(String(p.status||'').toUpperCase())}</span></td><td><strong>${esc(p.destinationLabel||'—')}</strong><small>${esc(p.destination||'')}</small></td><td>${formatNumber(p.scansMonth||0)}</td><td><div class="row wrap"><button class="btn btn-xs btn-ghost" data-action="download-qr" data-code="${esc(p.code)}">${ICONS.download} QR</button><button class="btn btn-xs btn-ghost" data-action="edit-destination" data-code="${esc(p.code)}">${ICONS.edit} Destino</button>${smart?`<button class="btn btn-xs btn-ghost" data-action="edit-smart-page" data-id="${esc(smart.id)}">Bio-site</button>`:''}<button class="btn btn-xs btn-ghost" data-action="operator-toggle-qr" data-code="${esc(p.code)}" data-status="${esc(p.status)}">${p.status==='paused'?'Ativar':'Pausar'}</button></div></td></tr>`}).join('');
+    return `${pageHead('Operação','QR Codes Dinâmicos','Cada QR é permanente. Você troca o destino no painel sem precisar gerar ou reimprimir o código.',`<button class="btn btn-primary" data-action="operator-new-qr">${ICONS.plus} Novo QR</button>`)}<div class="card table-card"><div class="responsive-table"><table><thead><tr><th>Código</th><th>Nome / cliente</th><th>Status</th><th>Destino atual</th><th>Acessos 30d</th><th>Ações</th></tr></thead><tbody>${rows||'<tr><td colspan="6">Nenhum QR criado ainda.</td></tr>'}</tbody></table></div></div>`;
+  }
+
+  function operatorClientsPage(){
+    const rows=(state.clients||[]).map(c=>`<tr><td><strong>${esc(c.name)}</strong><small>${esc(c.contact||'')}</small></td><td>${esc(c.phone||'—')}<small>${esc(c.email||'')}</small></td><td>${esc(c.city||'—')}</td><td>${c.plates||0}</td><td>${formatNumber(c.scans||0)}</td><td><span class="badge ${c.status==='active'?'badge-success':'badge-muted'}">${esc(String(c.status||'').toUpperCase())}</span></td></tr>`).join('');
+    return `${pageHead('Carteira','Meus clientes','Somente clientes criados dentro da sua operação aparecem aqui.',`<button class="btn btn-primary" data-action="operator-new-client">${ICONS.plus} Novo cliente</button>`)}<div class="card table-card"><div class="responsive-table"><table><thead><tr><th>Empresa</th><th>Contato</th><th>Cidade</th><th>QRs</th><th>Acessos</th><th>Status</th></tr></thead><tbody>${rows||'<tr><td colspan="6">Nenhum cliente cadastrado.</td></tr>'}</tbody></table></div></div>`;
+  }
+
+  function operatorLicenseBlockedPage(){
+    const op=state.operatorData.operator||{};
+    const access=state.operatorData.access||'suspended';
+    const end=op.license_ends_at?new Date(op.license_ends_at).toLocaleDateString('pt-BR'):'—';
+    const labels={expired:'LICENÇA EXPIRADA',scheduled:'ACESSO AGENDADO',suspended:'ACESSO SUSPENSO',missing:'ACESSO INDISPONÍVEL'};
+    const message=access==='expired'?'O período contratado terminou. Renove sua licença operacional para voltar a criar e administrar clientes, QR Codes e bio-sites.':access==='scheduled'?'Sua licença já está cadastrada, mas a data de início ainda não chegou.':'Seu acesso operacional está temporariamente indisponível. Entre em contato com o suporte TAJO Digital.';
+    return `${pageHead('TAJO TAP BUSINESS','Acesso operacional indisponível',message)}<section class="card card-pad settings-card"><div class="settings-row"><div><strong>${esc(op.brand_name||state.user?.name||'Operador')}</strong><span>${esc(state.user?.email||'')}</span></div><span class="badge badge-warning">${esc(labels[access]||'LICENÇA INATIVA')}</span></div><div class="settings-row"><div><strong>Plano</strong><span>Licença TAJO TAP BUSINESS</span></div><strong>${esc(String(op.plan||'business').toUpperCase())}</strong></div><div class="settings-row"><div><strong>Validade</strong><span>Fim do período contratado</span></div><strong>${esc(end)}</strong></div><div class="activation-notice"><strong>Seus dados permanecem preservados.</strong> A suspensão da licença não apaga automaticamente clientes, QR Codes ou bio-sites vinculados à sua operação.</div><button class="btn btn-danger" data-action="logout">${ICONS.logout} Sair da conta</button></section>`;
+  }
+
+  function operatorSettingsPage(){
+    const op=state.operatorData.operator||{}; const end=op.license_ends_at?new Date(op.license_ends_at).toLocaleDateString('pt-BR'):'—';
+    return `${pageHead('Conta BUSINESS','Minha licença','Informações do seu acesso operacional TAJO TAP.') }<div class="card card-pad settings-card"><div class="settings-row"><div><strong>${esc(op.brand_name||state.user?.name||'Operador')}</strong><span>${esc(state.user?.email||'')}</span></div><span class="badge ${state.operatorData.access==='active'?'badge-success':'badge-warning'}">${state.operatorData.access==='active'?'LICENÇA ATIVA':'LICENÇA INATIVA'}</span></div><div class="settings-row"><div><strong>Plano</strong><span>Definido pela TAJO</span></div><strong>${esc(String(op.plan||'business').toUpperCase())}</strong></div><div class="settings-row"><div><strong>Validade</strong><span>Renovação conforme contrato vigente</span></div><strong>${esc(end)}</strong></div><div class="settings-row"><div><strong>Limites</strong><span>QRs · clientes · bio-sites</span></div><strong>${op.qr_limit||0} · ${op.client_limit||0} · ${op.smart_page_limit||0}</strong></div><button class="btn btn-danger" data-action="logout">${ICONS.logout} Sair da conta</button></div>`;
+  }
+
+  function adminOperatorsPage(){
+    const cards=(state.operators||[]).map(o=>{const expired=o.license_ends_at&&new Date(o.license_ends_at)<=new Date();return `<article class="card card-pad"><div class="row-between"><div><div class="eyebrow">${o.active&&!expired?'ATIVO':expired?'EXPIRADO':'SUSPENSO'}</div><h2>${esc(o.brand_name)}</h2><p>${esc(o.business_email||'')}</p></div><span class="badge">${esc(String(o.plan||'business').toUpperCase())}</span></div><div class="seller-admin-metrics"><div><span>Clientes</span><strong>${o.clients_count||0}/${o.client_limit||0}</strong></div><div><span>QRs</span><strong>${o.qrs_count||0}/${o.qr_limit||0}</strong></div><div><span>Bio-sites</span><strong>${o.smart_pages_count||0}/${o.smart_page_limit||0}</strong></div><div><span>Acessos</span><strong>${formatNumber(o.scans_total||0)}</strong></div></div><div class="row-between"><small>${o.license_ends_at?`Vence ${new Date(o.license_ends_at).toLocaleDateString('pt-BR')}`:'Sem vencimento'}</small><button class="btn btn-sm btn-ghost" data-action="toggle-operator" data-id="${esc(o.id)}" data-active="${o.active?'1':'0'}">${o.active?'Suspender':'Reativar'}</button></div></article>`}).join('');
+    return `${pageHead('TAJO TAP BUSINESS','Operadores licenciados','Gerencie os alunos/licenciados que usam a plataforma para atender a própria carteira.',`<button class="btn btn-primary" data-action="new-operator">${ICONS.plus} Vincular operador</button>`)}<section class="seller-admin-grid">${cards||'<div class="card card-pad"><h2>Nenhum operador BUSINESS</h2><p>Crie a conta do comprador no Supabase Auth e vincule por e-mail.</p></div>'}</section>`;
+  }
+
+  function operatorClientModal(){
+    showModal(`<div class="modal-head"><div><div class="eyebrow">Minha carteira</div><h2>Novo cliente</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="operator-client-form"><div class="modal-body stack"><div class="field"><label>Empresa</label><input class="input" name="name" required></div><div class="form-grid"><div class="field"><label>Responsável</label><input class="input" name="contact"></div><div class="field"><label>WhatsApp</label><input class="input" name="phone"></div></div><div class="form-grid"><div class="field"><label>E-mail</label><input class="input" type="email" name="email"></div><div class="field"><label>Cidade</label><input class="input" name="city"></div></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Cadastrar cliente</button></div></form>`);
+  }
+
+  function operatorQrModal(){
+    if(!(state.clients||[]).length){toast('Cadastre um cliente primeiro','Todo QR da operação precisa ficar vinculado a uma empresa.');return operatorClientModal();}
+    showModal(`<div class="modal-head"><div><div class="eyebrow">QR Dinâmico</div><h2>Criar novo acesso</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="operator-qr-form" data-current-type="custom"><div class="modal-body stack"><div class="form-grid"><div class="field"><label>Cliente</label><select class="select" name="clientId" required>${state.clients.filter(c=>c.status==='active').map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Nome interno</label><input class="input" name="name" placeholder="Ex.: QR balcão" required></div></div><div class="field"><label>Formato</label><select class="select" name="assetKind"><option value="dynamic_qr">QR Code Dinâmico</option><option value="smart_plate">Plaquinha inteligente</option></select></div><div class="choice-grid destination-edit-grid">${[['custom','Link'],['whatsapp','WhatsApp'],['instagram','Instagram'],['google','Google'],['map','Localização'],['smart','Bio-site']].map(([id,n])=>`<button type="button" class="choice operator-qr-choice ${id==='custom'?'active':''}" data-type="${id}">${destinationIcon(id)}<strong>${n}</strong></button>`).join('')}</div><input type="hidden" name="type" value="custom"><div class="stack" data-destination-fields>${destinationEditFields('custom')}</div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Criar QR permanente</button></div></form>`,true);
+  }
+
+  function operatorSmartModal(){
+    const available=(state.plaques||[]).filter(p=>p.status!=='archived'&&!smartPageForPlateCode(p.code));
+    if(!available.length)return toast('Nenhum QR disponível','Crie um QR primeiro ou todos os seus QR Codes já possuem bio-site.');
+    showModal(`<div class="modal-head"><div><div class="eyebrow">Bio-site</div><h2>Criar Smart Page</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="operator-smart-form"><div class="modal-body stack"><div class="field"><label>QR Code</label><select class="select" name="plateCode" required>${available.map(p=>`<option value="${esc(p.code)}">${esc(p.code)} · ${esc(p.client)} · ${esc(p.name)}</option>`).join('')}</select></div><div class="field"><label>Nome público do negócio</label><input class="input" name="businessName" required placeholder="Nome que aparecerá no bio-site"></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Criar bio-site</button></div></form>`);
+  }
+
+  function adminOperatorModal(){
+    showModal(`<div class="modal-head"><div><div class="eyebrow">TAJO TAP BUSINESS</div><h2>Vincular operador</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="admin-operator-form"><div class="modal-body stack"><div class="activation-notice"><strong>Licença, não código-fonte.</strong> A conta recebe acesso operacional isolado para atender a própria carteira.</div><div class="form-grid"><div class="field"><label>E-mail da conta Auth</label><input class="input" type="email" name="email" required></div><div class="field"><label>Nome da operação</label><input class="input" name="brand_name" required></div></div><div class="form-grid"><div class="field"><label>Plano</label><select class="select" name="plan"><option value="founders">Fundadores</option><option value="business" selected>Business</option><option value="custom">Custom</option></select></div><div class="field"><label>Validade (dias)</label><input class="input" type="number" min="1" max="3650" name="license_days" value="365"></div></div><div class="form-grid"><div class="field"><label>Limite de QRs</label><input class="input" type="number" min="1" name="qr_limit" value="50"></div><div class="field"><label>Limite de clientes</label><input class="input" type="number" min="1" name="client_limit" value="100"></div><div class="field"><label>Limite de bio-sites</label><input class="input" type="number" min="0" name="smart_page_limit" value="50"></div></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Liberar licença</button></div></form>`);
+  }
+
   function adminSellersPage(){ return `${pageHead('Equipe comercial','Vendedores','Gerencie acesso, comissão e acompanhe resultados individuais sem misturar carteiras.',`<button class="btn btn-primary" data-action="new-seller">${ICONS.plus} Vincular vendedor</button>`)}<section class="seller-admin-grid">${(state.sellers||[]).map(s=>`<article class="card card-pad"><div class="row-between"><div><div class="eyebrow">${s.active?'ATIVO':'INATIVO'}</div><h2>${esc(s.full_name)}</h2><p>${esc(s.phone||'Sem telefone')}</p></div><span class="badge">${esc(s.commission_rate)}%</span></div><div class="seller-admin-metrics"><div><span>Leads</span><strong>${s.metrics?.leads||0}</strong></div><div><span>Vendas</span><strong>${s.metrics?.sales||0}</strong></div><div><span>Receita paga</span><strong>${brl(s.metrics?.revenue_cents)}</strong></div><div><span>Comissão</span><strong>${brl(s.metrics?.commission_cents)}</strong></div></div><button class="btn btn-sm btn-ghost" data-action="toggle-seller" data-id="${esc(s.id)}" data-active="${s.active?'1':'0'}">${s.active?'Desativar acesso':'Reativar acesso'}</button></article>`).join('')||'<div class="card card-pad"><h2>Nenhum vendedor vinculado</h2><p>Crie a conta no Supabase Auth e vincule por e-mail aqui.</p></div>'}</section><section class="card table-card" style="margin-top:18px"><div class="card-title card-pad"><div><h2>Vendas aguardando validação</h2><p>Comissão só entra nos resultados pagos após aprovação administrativa.</p></div></div><div class="responsive-table"><table><thead><tr><th>Cliente</th><th>Valor</th><th>Comissão</th><th>Status</th><th>Ação</th></tr></thead><tbody>${(state.adminSales||[]).filter(x=>x.status==='pending').map(x=>`<tr><td><strong>${esc(x.customer_name||'Cliente')}</strong><small>${esc(x.customer_email||'')}</small></td><td>${brl(x.amount_cents)}</td><td>${brl(x.commission_cents)}</td><td><span class="badge">Pendente</span></td><td><button class="btn btn-sm btn-primary" data-action="approve-sale" data-id="${esc(x.id)}">Aprovar pagamento</button></td></tr>`).join('')||'<tr><td colspan="5">Nenhuma venda pendente.</td></tr>'}</tbody></table></div></section>`; }
   function teamChatPage(){ const msgs=state.sellerData.messages||[]; return `${pageHead('Equipe TAJO','Chat dos vendedores','Canal interno compartilhado entre vendedores ativos e administradores. As mensagens ficam salvas no banco.') }<section class="card team-chat"><div class="chat-messages" id="chat-messages">${msgs.map(m=>`<div class="chat-message ${m.sender_user_id===state.user?.id?'mine':''}"><div class="chat-meta"><strong>${esc(m.sender_name)}</strong><span>${m.sender_role==='admin'?'Admin':'Vendedor'} · ${new Date(m.created_at).toLocaleString('pt-BR')}</span></div><p>${esc(m.body)}</p></div>`).join('')||'<div class="empty-state">Nenhuma mensagem ainda. Comece a conversa.</div>'}</div><form id="team-chat-form" class="chat-compose"><textarea class="input" name="body" maxlength="1200" rows="2" placeholder="Escreva para a equipe..." required></textarea><button class="btn btn-primary">Enviar ${ICONS.arrow}</button></form></section>`; }
   async function refreshChat(){ try{ const out=await apiFetch('/api/seller/chat'); state.sellerData.messages=out.messages||[]; if(route().name==='team-chat'){ const box=$('#chat-messages'); if(box){box.innerHTML=state.sellerData.messages.map(m=>`<div class="chat-message ${m.sender_user_id===state.user?.id?'mine':''}"><div class="chat-meta"><strong>${esc(m.sender_name)}</strong><span>${m.sender_role==='admin'?'Admin':'Vendedor'} · ${new Date(m.created_at).toLocaleString('pt-BR')}</span></div><p>${esc(m.body)}</p></div>`).join(''); box.scrollTop=box.scrollHeight;}} }catch{} }
@@ -465,6 +565,7 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
     if (r.name === 'analytics') return analyticsPage();
     if (r.name === 'sales') return salesPage();
     if (r.name === 'sellers') return adminSellersPage();
+    if (r.name === 'operators') return adminOperatorsPage();
     if (r.name === 'team-chat') return teamChatPage();
     if (r.name === 'settings') return settingsPage();
     return notFoundPage();
@@ -528,7 +629,7 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
       ${pageHead('Plaquinha','Gerenciar '+esc(p.code),esc(p.name)+' · '+esc(p.client), `<button class="btn btn-ghost" data-action="copy" data-copy="${esc(qrUrl)}">${ICONS.copy} Copiar QR</button><button class="btn btn-primary" data-action="edit-destination" data-code="${esc(p.code)}">${ICONS.edit} Alterar destino</button>`)}
       <div class="detail-grid">
         <div class="stack">
-          <section class="card plaque-hero"><div class="row-between"><span class="badge ${p.status==='active'?'badge-success':'badge-warning'}">${p.status==='active'?'ATIVA':'STATUS: '+esc(p.status.toUpperCase())}</span><img src="assets/images/tajo-tap-mark.png" alt="" style="width:54px;background:#fff;border-radius:13px;padding:5px"></div><div><div class="plaque-code">${esc(p.code)}</div><div class="plaque-link">${esc(qrUrl)}</div></div></section>
+          <section class="card plaque-hero"><div class="row-between"><span class="badge ${p.status==='active'?'badge-success':'badge-warning'}">${p.status==='active'?'ATIVA':'STATUS: '+esc(p.status.toUpperCase())}</span><img src="assets/images/tajo-tap-mark.png" alt="" style="width:54px;height:54px;object-fit:contain;background:#070a10;border:1px solid #263044;border-radius:13px;padding:3px"></div><div><div class="plaque-code">${esc(p.code)}</div><div class="plaque-link">${esc(qrUrl)}</div></div></section>
           <section class="card card-pad"><div class="card-title"><div><h2>Ativação do cliente</h2><p>${esc(setupLabel)}.</p></div><span class="badge ${p.configurationLocked?'badge-success':'badge-warning'}">${p.configurationLocked?'BLOQUEADA':'PENDENTE'}</span></div><div class="form-grid"><div class="field"><label>URL de ativação</label><input class="input mono" readonly value="${esc(activationUrl)}"></div><div class="field"><label>PIN da plaquinha</label><div class="pin-admin-field"><input class="input mono activation-pin-output" readonly value="${esc(p.activationPin || (p.pinConsumedAt || p.configurationLocked ? 'PIN utilizado' : 'PIN legado não recuperável'))}"><div class="row wrap">${p.activationPin?`<button class="btn btn-ghost" data-action="copy" data-copy="${esc(p.activationPin)}">${ICONS.copy} Copiar PIN</button>`:''}${!p.configurationLocked && p.setupStatus!=='completed'?`<button class="btn btn-ghost" data-action="reset-pin" data-code="${esc(p.code)}">${p.activationPin?'Gerar novo PIN':'Gerar PIN visível'}</button>`:''}</div></div><span class="field-help">Disponível apenas para administradores. Em plaquinhas antigas criadas antes da V4.2, gere um novo PIN uma única vez.</span></div></div><div class="form-grid"><div class="field"><label>Proprietário</label><input class="input" readonly value="${esc(p.ownerUserId ? 'Conta vinculada' : 'Ainda não vinculado')}"></div><div class="field"><label>Status do PIN</label><input class="input" readonly value="${esc(p.pinConsumedAt ? 'Utilizado' : p.pinLockedUntil ? 'Temporariamente bloqueado' : p.activationPin ? 'Pronto para envio' : 'Requer novo PIN')}"></div></div><div class="row wrap" style="margin-top:14px"><button class="btn btn-ghost" data-action="copy" data-copy="${esc(activationUrl)}">${ICONS.copy} Copiar ativação</button></div></section>
           <section class="card card-pad"><div class="card-title"><div><h2>Destino atual</h2><p>O QR e o NFC permanecem iguais. Só o destino muda.</p></div>${statusBadge(p.status)}</div><div class="destination-option active"><div class="destination-icon">${destinationIcon(p.destinationType)}</div><div class="destination-copy"><strong>${esc(p.destinationLabel)}</strong><span>${p.destination ? esc(p.destination) : 'O cliente ainda precisa escolher um destino.'}</span></div></div><div class="row wrap" style="margin-top:16px"><button class="btn btn-primary" data-action="edit-destination" data-code="${esc(p.code)}">${ICONS.edit} Alterar destino</button><button class="btn btn-ghost" data-action="toggle-plate" data-code="${esc(p.code)}">${p.status==='paused'?'Ativar plaquinha':'Pausar plaquinha'}</button></div></section>
           <section class="metric-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">${metric('Hoje',formatNumber(p.scansToday),'Acessos','scan')}${metric('Este mês',formatNumber(p.scansMonth),'Acessos','analytics')}${metric('Total',formatNumber(p.scansTotal),'Desde ativação','dashboard')}</section>
@@ -699,7 +800,7 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
   function settingsPage() {
     return `${pageHead('Sistema','Configurações','Preferências, sessão e parâmetros do TAJO TAP.', '')}
       <div class="detail-grid">
-        <section class="card card-pad"><div class="card-title"><div><h2>Identidade</h2><p>A marca oficial já está aplicada em todo o sistema.</p></div></div><div class="row" style="padding:20px;background:#fff;border-radius:16px;border:1px solid #e5e8e4"><img src="assets/images/tajo-tap-logo.png" style="width:min(260px,80%)" alt="TAJO TAP"></div><div class="form-grid" style="margin-top:18px"><div class="field"><label>Domínio principal</label><input class="input" readonly value="${esc(CONFIG.primaryDomain)}"></div><div class="field"><label>Sistema TAJO TAP</label><input class="input" readonly value="${esc(CONFIG.goDomain)}"></div></div></section>
+        <section class="card card-pad"><div class="card-title"><div><h2>Identidade</h2><p>A marca oficial já está aplicada em todo o sistema.</p></div></div><div class="row" style="padding:20px;background:#fff;border-radius:16px;border:1px solid #e5e8e4"><img src="assets/images/tajo-tap-logo.png" style="width:min(360px,92%);max-height:240px;object-fit:contain" alt="TAJO TAP BUSINESS"></div><div class="form-grid" style="margin-top:18px"><div class="field"><label>Domínio principal</label><input class="input" readonly value="${esc(CONFIG.primaryDomain)}"></div><div class="field"><label>Sistema TAJO TAP</label><input class="input" readonly value="${esc(CONFIG.goDomain)}"></div></div></section>
         <div class="stack"><section class="card card-pad"><div class="card-title"><div><h2>Experiência</h2><p>Preferências locais do frontend.</p></div></div><div class="destination-option"><div class="destination-icon">${state.theme==='dark'?ICONS.moon:ICONS.sun}</div><div class="destination-copy" style="flex:1"><strong>Tema ${state.theme==='dark'?'escuro':'claro'}</strong><span>Você pode alternar a qualquer momento.</span></div><button class="btn btn-sm btn-ghost" data-action="theme">Alternar</button></div><div class="destination-option" style="margin-top:12px"><div class="destination-icon">${ICONS.lock}</div><div class="destination-copy"><strong>Backend conectado</strong><span>Vercel Functions + Supabase Auth + PostgreSQL + motor de redirecionamento.</span></div></div></section>
         <section class="card card-pad"><div class="card-title"><div><h2>Sessão</h2><p>Conta atualmente autenticada no sistema.</p></div></div><div class="account-session"><div class="avatar">${esc(userInitials())}</div><div><strong>${esc(state.user?.name || 'Administrador')}</strong><span>${esc(state.user?.email || 'Conta TAJO TAP')}</span></div></div><button class="btn btn-dark" style="width:100%;margin-top:16px" data-action="logout">${ICONS.logout} Sair da conta</button></section></div>
       </div>`;
@@ -712,7 +813,7 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
     const pages = state.smartPages || [];
     app.innerHTML = `
       <div class="activate-shell portal-shell-v6" style="display:block;padding:0;background:var(--bg);color:var(--ink)">
-        <header class="topbar" style="position:sticky"><a href="#/portal"><img src="assets/images/tajo-tap-logo.png" style="width:140px;background:#fff;border-radius:11px;padding:6px 8px" alt="TAJO TAP"></a><div class="topbar-title portal-title"><strong>Meu TAJO TAP</strong><span>Plaquinhas + Smart Page</span></div><div style="margin-left:auto" class="row"><button class="btn btn-ghost" data-action="theme">${state.theme==='dark'?ICONS.sun:ICONS.moon}</button><button class="btn btn-dark" data-action="portal-exit">Sair</button></div></header>
+        <header class="topbar" style="position:sticky"><a href="#/portal"><img src="assets/images/tajo-tap-logo.png" style="width:160px;max-height:80px;object-fit:contain;background:#070a10;border:1px solid #263044;border-radius:11px;padding:4px 6px" alt="TAJO TAP BUSINESS"></a><div class="topbar-title portal-title"><strong>Meu TAJO TAP</strong><span>Plaquinhas + Smart Page</span></div><div style="margin-left:auto" class="row"><button class="btn btn-ghost" data-action="theme">${state.theme==='dark'?ICONS.sun:ICONS.moon}</button><button class="btn btn-dark" data-action="portal-exit">Sair</button></div></header>
         <main class="content">
           ${pageHead('Área do cliente','Sua presença digital em um só lugar.','Edite a Smart Page do seu negócio e controle para onde suas plaquinhas direcionam os clientes.', '')}
           <section class="client-smart-hero"><div><div class="eyebrow">TAJO SMART PAGE</div><h2>Seu biosite comercial, editável pelo próprio painel.</h2><p>WhatsApp, Instagram, localização, avaliações, Pix, Wi-Fi, serviços e outros links ficam centralizados em uma página moderna.</p></div><div class="smart-orbit">${ICONS.globe}</div></section>
@@ -787,7 +888,7 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
   }
 
   function activationShell(content, badge = 'ATIVAÇÃO SEGURA', badgeType = 'warning') {
-    return `<main class="activate-shell"><section class="activate-card"><header class="activate-head"><img class="activate-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP"><span class="badge badge-${badgeType}">${badge}</span></header><div class="activate-body">${content}</div></section></main>`;
+    return `<main class="activate-shell"><section class="activate-card"><header class="activate-head"><img class="activate-logo" src="assets/images/tajo-tap-logo.png" alt="TAJO TAP BUSINESS"><span class="badge badge-${badgeType}">${badge}</span></header><div class="activate-body">${content}</div></section></main>`;
   }
 
   function renderActivation(code) {
@@ -851,7 +952,7 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
 
       const tabs = `<div class="activation-tabs"><button class="${state.activation.accountMode==='signup'?'active':''}" data-action="activation-account-mode" data-mode="signup">Criar minha conta</button><button class="${state.activation.accountMode==='existing'?'active':''}" data-action="activation-account-mode" data-mode="existing">Já tenho uma conta</button></div>`;
       if (state.activation.accountMode === 'existing') {
-        return `<h1>Entre na sua conta.</h1><p>Use seu acesso TAJO TAP. Depois do login, esta plaquinha será vinculada ao seu negócio.</p>${purchaseAccess}${tabs}<form id="activation-existing-login-form" class="stack"><div class="form-grid"><div class="field"><label>E-mail</label><input class="input" name="email" type="email" autocomplete="email" value="${esc(state.activation.email)}" required></div><div class="field"><label>Senha</label><input class="input" name="password" type="password" autocomplete="current-password" minlength="8" required></div></div><div class="form-grid"><div class="field"><label>Estabelecimento</label><input class="input" name="company" autocomplete="organization" value="${esc(state.activation.companyName)}" required></div><div class="field"><label>WhatsApp</label><input class="input" name="phone" inputmode="tel" autocomplete="tel" value="${esc(state.activation.phone)}"></div></div><div class="row activation-actions"><button type="button" class="btn btn-ghost" data-action="activation-back">Voltar</button><button class="btn btn-primary" style="flex:1" type="submit">Entrar e continuar ${ICONS.arrow}</button></div></form>`;
+        return `<h1>Entre na sua conta.</h1><p>Use seu acesso TAJO TAP. Depois do login, esta plaquinha será vinculada ao seu negócio.</p>${purchaseAccess}${tabs}<form id="activation-existing-login-form" class="stack"><div class="form-grid"><div class="field"><label>E-mail</label><input class="input" name="email" type="email" autocomplete="email" data-activation-key="email" value="${esc(state.activation.email)}" required></div><div class="field"><label>Senha</label><input class="input" name="password" type="password" autocomplete="current-password" minlength="8" required></div></div><div class="form-grid"><div class="field"><label>Estabelecimento</label><input class="input" name="company" autocomplete="organization" data-activation-key="companyName" value="${esc(state.activation.companyName)}" required></div><div class="field"><label>WhatsApp</label><input class="input" name="phone" inputmode="tel" autocomplete="tel" data-activation-key="phone" value="${esc(state.activation.phone)}"></div></div><div class="row activation-actions"><button type="button" class="btn btn-ghost" data-action="activation-back">Voltar</button><button class="btn btn-primary" style="flex:1" type="submit">Entrar e continuar ${ICONS.arrow}</button></div></form>`;
       }
 
       return `<h1>Crie seu acesso.</h1><p>Essa conta será a proprietária da plaquinha e permitirá alterar o destino futuramente pelo painel.</p>${tabs}<div class="stack"><div class="form-grid"><div class="field"><label for="activation-name">Seu nome</label><input id="activation-name" class="input" value="${esc(state.activation.fullName)}" autocomplete="name" placeholder="Nome do responsável"></div><div class="field"><label for="activation-company">Estabelecimento</label><input id="activation-company" class="input" value="${esc(state.activation.companyName)}" autocomplete="organization" placeholder="Nome da empresa"></div></div><div class="form-grid"><div class="field"><label for="activation-email">E-mail</label><input id="activation-email" class="input" type="email" value="${esc(state.activation.email)}" autocomplete="email" placeholder="voce@empresa.com.br"></div><div class="field"><label for="activation-phone">WhatsApp</label><input id="activation-phone" class="input" value="${esc(state.activation.phone)}" inputmode="tel" autocomplete="tel" placeholder="(27) 99999-9999"></div></div><div class="field"><label for="activation-password">Crie uma senha</label><input id="activation-password" class="input" type="password" autocomplete="new-password" minlength="8" placeholder="Mínimo de 8 caracteres"><span class="field-help">Use uma senha exclusiva. A TAJO nunca solicita sua senha por WhatsApp.</span></div></div><div class="row activation-actions"><button class="btn btn-ghost" data-action="activation-back">Voltar</button><button class="btn btn-primary" style="flex:1" data-action="activation-next">Continuar ${ICONS.arrow}</button></div>`;
@@ -1198,13 +1299,17 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
     if(routeEl){ e.preventDefault(); go(routeEl.dataset.route); return; }
     const actionEl=e.target.closest('[data-action]'); if(!actionEl) return;
     const action=actionEl.dataset.action;
-    if(action==='logout'||action==='portal-exit'){ try{await apiFetch('/api/auth/logout',{method:'POST'});}catch{} state.role=null;state.sessionRole=null;state.user=null;state.plaques=[];state.clients=[];state.smartPages=[];state.selectedPlateCodes=[];go('login'); }
+    if(action==='logout'||action==='portal-exit'){ try{await apiFetch('/api/auth/logout',{method:'POST'});}catch{} state.role=null;state.sessionRole=null;state.user=null;state.plaques=[];state.clients=[];state.smartPages=[];state.selectedPlateCodes=[];state.operatorData={operator:null,access:'',metrics:{},clients:[],qrs:[],smartPages:[]};go('login'); }
     if(action==='toggle-sidebar'){state.sidebarOpen=!state.sidebarOpen;render();}
     if(action==='close-sidebar'){state.sidebarOpen=false;render();}
     if(action==='theme'){setTheme(state.theme==='dark'?'light':'dark');render();}
     if(action==='notifications') toast('Tudo em dia','Nenhuma notificação crítica no momento.');
     if(action==='new-plaque') newPlaqueModal();
     if(action==='new-client') newClientModal();
+    if(action==='operator-new-client' && state.role==='operator') operatorClientModal();
+    if(action==='operator-new-qr' && state.role==='operator') operatorQrModal();
+    if(action==='operator-new-smart' && state.role==='operator') operatorSmartModal();
+    if(action==='new-operator' && state.role==='admin') adminOperatorModal();
     if(action==='open-scanner') openScannerModal();
     if(action==='close-modal') closeModal();
     if(action==='modal-backdrop' && e.target===actionEl) closeModal();
@@ -1221,6 +1326,7 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
     if(action==='go-seller-lots') go('seller-lots');
     if(action==='go-production') go('production');
     if(action==='go-sellers') go('sellers');
+    if(action==='go-operator-sales') go('sales');
     if(action==='edit-smart-page') smartPageModal(actionEl.dataset.id);
     if(action==='seller-destination' && state.role==='seller') sellerDestinationModal(actionEl.dataset.code, actionEl.dataset.smart||'');
     if(action==='new-seller-lead') showModal(`<div class="modal-head"><div><div class="eyebrow">CRM</div><h2>Novo lead</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="seller-lead-form"><div class="modal-body stack"><div class="field"><label>Negócio</label><input class="input" name="business_name" required></div><div class="form-grid"><div class="field"><label>Contato</label><input class="input" name="contact_name"></div><div class="field"><label>WhatsApp</label><input class="input" name="phone"></div></div><div class="form-grid"><div class="field"><label>Cidade</label><input class="input" name="city"></div><div class="field"><label>Nicho</label><input class="input" name="niche"></div></div><div class="field"><label>Instagram</label><input class="input" name="instagram"></div><div class="field"><label>Observações</label><textarea class="input" name="notes" rows="3"></textarea></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar lead</button></div></form>`);
@@ -1236,6 +1342,13 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
     if(action==='assign-batch-seller' && state.role==='admin'){
       const batch=batchById(actionEl.dataset.id); if(!batch)return;
       showModal(`<div class="modal-head"><div><div class="eyebrow">Distribuição</div><h2>Responsável pelo lote</h2></div><button class="btn btn-icon btn-ghost" data-action="close-modal">${ICONS.close}</button></div><form id="assign-batch-form" data-id="${esc(batch.id)}"><div class="modal-body stack"><div class="activation-notice">Informe o e-mail exato usado no login do vendedor. Deixe vazio para devolver o lote ao estoque interno TAJO.</div><div class="field"><label>E-mail do vendedor</label><input class="input" type="email" name="sellerEmail" value="${esc(batch.assignedEmail||'')}" placeholder="vendedor@empresa.com.br"></div></div><div class="modal-footer"><button type="button" class="btn btn-ghost" data-action="close-modal">Cancelar</button><button class="btn btn-primary">Salvar responsável</button></div></form>`);
+    }
+    if(action==='operator-toggle-qr' && state.role==='operator'){
+      const current=String(actionEl.dataset.status||''); const next=current==='paused'?'active':'paused';
+      try{await apiFetch('/api/operator/hub',{method:'PATCH',body:{kind:'status',code:actionEl.dataset.code,status:next}});await loadOperatorData();toast('Status atualizado',next==='active'?'QR reativado.':'QR pausado temporariamente.');render();}catch(err){toast('Não foi possível atualizar',err.message);}
+    }
+    if(action==='toggle-operator' && state.role==='admin'){
+      try{await apiFetch('/api/admin/operators',{method:'PATCH',body:{id:actionEl.dataset.id,active:actionEl.dataset.active!=='1'}});await loadOperatorsAdmin();toast('Operador atualizado');render();}catch(err){toast('Não foi possível atualizar',err.message);}
     }
     if(action==='seller-deliver-plate' && state.role==='seller'){
       try{await apiFetch('/api/seller/hub',{method:'PATCH',body:{kind:'plate-delivered',code:actionEl.dataset.code}});await loadSellerData();toast('Entrega registrada',`${actionEl.dataset.code} agora está aguardando ativação do cliente.`);render();}catch(err){toast('Não foi possível atualizar',err.message);}
@@ -1285,7 +1398,7 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
       try { await apiFetch(`/api/admin/plate?code=${encodeURIComponent(code)}`,{method:'DELETE',body:{confirmCode}}); state.plaques=state.plaques.filter(x=>x.code!==code); closeModal(); toast('Plaquinha excluída',`${code} foi removida do sistema.`); go('plaques'); }
       catch(err){ toast('Não foi possível excluir',err.message); actionEl.disabled=false; } finally { state.busy=false; }
     }
-    if(action==='activation-home'){ go(state.role==='admin'?'dashboard':state.role==='seller'?'seller-dashboard':state.role==='client'?'portal':'login'); }
+    if(action==='activation-home'){ go(state.role==='admin'?'dashboard':state.role==='seller'?'seller-dashboard':state.role==='operator'?'operator-dashboard':state.role==='client'?'portal':'login'); }
     if(action==='activation-retry'){ state.activation.loaded=false;state.activation.error='';state.activation.plate=null;render(); }
     if(action==='activation-account-mode'){ state.activation.accountMode=actionEl.dataset.mode==='existing'?'existing':'signup';render(); }
     if(action==='activation-choice'){
@@ -1348,7 +1461,7 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
             const session=await apiFetch('/api/auth/me');
             state.user=session.user||state.user;
             state.sessionRole=session.role||state.sessionRole;
-            if(session.role==='admin'||session.role==='client'||session.role==='seller'){
+            if(session.role==='admin'||session.role==='client'||session.role==='seller'||session.role==='operator'){
               state.role=session.role;
               await refreshRoleData();
             }
@@ -1374,11 +1487,11 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
       state.activation.step=2;
       render();
     }
-    if(action==='activation-finish'){ go(state.role==='admin'?'dashboard':state.role==='seller'?'seller-dashboard':state.role==='client'?'portal':'login'); }
+    if(action==='activation-finish'){ go(state.role==='admin'?'dashboard':state.role==='seller'?'seller-dashboard':state.role==='operator'?'operator-dashboard':state.role==='client'?'portal':'login'); }
   });
 
   document.addEventListener('submit', async (e) => {
-    if(e.target.id==='login-form') { e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target); try{ const out=await apiFetch('/api/auth/login',{method:'POST',body:{email:fd.get('email'),password:fd.get('password')}}); state.role=out.role;state.sessionRole=out.role;state.user=out.user||null;await refreshRoleData(); const after=sessionStorage.getItem('tajoTapAfterLogin');sessionStorage.removeItem('tajoTapAfterLogin'); if(after) go(after); else go(state.role==='admin'?'dashboard':state.role==='seller'?'seller-dashboard':'portal'); }catch(err){toast('Não foi possível entrar',err.message);} }
+    if(e.target.id==='login-form') { e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target); try{ const out=await apiFetch('/api/auth/login',{method:'POST',body:{email:fd.get('email'),password:fd.get('password')}}); state.role=out.role;state.sessionRole=out.role;state.user=out.user||null;if(out.role==='operator')state.operatorData={...state.operatorData,operator:out.operator||null,access:out.operatorAccess||''};await refreshRoleData(); const after=sessionStorage.getItem('tajoTapAfterLogin');sessionStorage.removeItem('tajoTapAfterLogin'); if(after) go(after); else go(state.role==='admin'?'dashboard':state.role==='seller'?'seller-dashboard':state.role==='operator'?'operator-dashboard':'portal'); }catch(err){toast('Não foi possível entrar',err.message);} }
     if(e.target.id==='activation-existing-login-form'){
       e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target);
       state.activation.email=String(fd.get('email')||'').trim().toLowerCase();
@@ -1388,7 +1501,7 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
       try {
         const out=await apiFetch('/api/public/activation-login',{method:'POST',body:{email:state.activation.email,password:fd.get('password')}});
         state.user=out.user||null;state.sessionRole=out.role||'unassigned';
-        if(out.role==='admin'||out.role==='client'||out.role==='seller'){state.role=out.role;await refreshRoleData();}
+        if(out.role==='admin'||out.role==='client'||out.role==='seller'||out.role==='operator'){state.role=out.role;await refreshRoleData();}
         await loadActivationPlate(state.activation.code);
         if(state.activation.access?.restricted && state.activation.access?.sessionMatchesPurchaseEmail === false){
           toast('E-mail diferente da compra',`Esta plaquinha foi reservada para ${state.activation.access.emailMasked||'outro e-mail'}. Troque de conta para continuar.`);render();return;
@@ -1423,6 +1536,22 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
       try { const out=await apiFetch('/api/admin/clients',{method:'POST',body:{name:fd.get('name'),contact:fd.get('contact'),phone:fd.get('phone'),city:fd.get('city')}}); state.clients.unshift(out.client); closeModal(); toast('Cliente cadastrado',out.client.name); render(); }
       catch(err){ toast('Não foi possível cadastrar',err.message); }
     }
+    if(e.target.id==='operator-client-form'){
+      e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target);
+      try{await apiFetch('/api/operator/hub',{method:'POST',body:{kind:'client',name:fd.get('name'),contact:fd.get('contact'),phone:fd.get('phone'),email:fd.get('email'),city:fd.get('city')}});await loadOperatorData();closeModal();toast('Cliente cadastrado','Sua carteira foi atualizada.');render();}catch(err){toast('Não foi possível cadastrar',err.message);}
+    }
+    if(e.target.id==='operator-qr-form'){
+      e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target);
+      try{const out=await apiFetch('/api/operator/hub',{method:'POST',body:{kind:'qr',clientId:fd.get('clientId'),name:fd.get('name'),assetKind:fd.get('assetKind'),type:fd.get('type'),value:fd.get('destination'),message:fd.get('message')}});await Promise.all([loadOperatorData(),loadSmartPages()]);closeModal();toast('QR Dinâmico criado',out.plate?.code||'Pronto para uso.');render();}catch(err){toast('Não foi possível criar o QR',err.message);}
+    }
+    if(e.target.id==='operator-smart-form'){
+      e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target); const code=String(fd.get('plateCode')||''); const plate=state.plaques.find(p=>p.code===code);
+      try{const out=await apiFetch('/api/smart-pages',{method:'POST',body:{plateCode:code,clientId:plate?.clientId||'',businessName:fd.get('businessName')}});await apiFetch('/api/operator/hub',{method:'PATCH',body:{kind:'destination',code,type:'smart'}});await Promise.all([loadOperatorData(),loadSmartPages()]);closeModal();toast('Bio-site criado',out.page?.publicUrl||'O QR já aponta para a nova página.');render();}catch(err){toast('Não foi possível criar o bio-site',err.message);}
+    }
+    if(e.target.id==='admin-operator-form'){
+      e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target);
+      try{await apiFetch('/api/admin/operators',{method:'POST',body:{email:fd.get('email'),brand_name:fd.get('brand_name'),plan:fd.get('plan'),license_days:fd.get('license_days'),qr_limit:fd.get('qr_limit'),client_limit:fd.get('client_limit'),smart_page_limit:fd.get('smart_page_limit')}});await loadOperatorsAdmin();closeModal();toast('Operador BUSINESS liberado');render();}catch(err){toast('Não foi possível liberar',err.message);}
+    }
     if(e.target.id==='seller-lead-form'){e.preventDefault();if(!e.target.reportValidity())return;const fd=new FormData(e.target);try{await apiFetch('/api/seller/hub',{method:'POST',body:{kind:'lead',business_name:fd.get('business_name'),contact_name:fd.get('contact_name'),phone:fd.get('phone'),city:fd.get('city'),niche:fd.get('niche'),instagram:fd.get('instagram'),notes:fd.get('notes')}});await loadSellerData();closeModal();toast('Lead salvo');render();}catch(err){toast('Não foi possível salvar',err.message);} }
     if(e.target.id==='seller-sale-form'){e.preventDefault();if(!e.target.reportValidity())return;const fd=new FormData(e.target);const amount=Number(String(fd.get('amount')||'').replace(/\./g,'').replace(',','.'));try{const out=await apiFetch('/api/seller/hub',{method:'POST',body:{kind:'sale',plate_code:fd.get('plate_code'),customer_name:fd.get('customer_name'),customer_email:fd.get('customer_email'),amount,notes:fd.get('notes')}});await Promise.all([loadSellerData(),loadSmartPages()]);closeModal();toast('Venda registrada',out.smartPage?.url?'Smart Page criada e vinculada ao e-mail do cliente.':'A plaquinha saiu do estoque e aguarda aprovação.');render();}catch(err){toast('Não foi possível registrar',err.message);} }
     if(e.target.id==='admin-seller-form'){e.preventDefault();if(!e.target.reportValidity())return;const fd=new FormData(e.target);try{await apiFetch('/api/admin/sellers',{method:'POST',body:{full_name:fd.get('full_name'),email:fd.get('email'),phone:fd.get('phone'),commission_rate:fd.get('commission_rate')}});await loadSellersAdmin();closeModal();toast('Vendedor vinculado');render();}catch(err){toast('Não foi possível vincular',err.message);} }
@@ -1444,8 +1573,10 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
     if(e.target.id==='destination-form'){
       e.preventDefault(); if(!e.target.reportValidity()) return; const fd=new FormData(e.target), p=state.plaques.find(x=>x.code===e.target.dataset.code); if(!p) return;
       try {
-        const endpoint=state.role==='admin'?'/api/admin/destination':'/api/client/destination';
-        await apiFetch(endpoint,{method:'POST',body:{code:p.code,type:fd.get('type'),value:fd.get('destination'),message:fd.get('message')}});
+        const endpoint=state.role==='admin'?'/api/admin/destination':state.role==='operator'?'/api/operator/hub':'/api/client/destination';
+        const method=state.role==='operator'?'PATCH':'POST';
+        const body=state.role==='operator'?{kind:'destination',code:p.code,type:fd.get('type'),value:fd.get('destination'),message:fd.get('message')}:{code:p.code,type:fd.get('type'),value:fd.get('destination'),message:fd.get('message')};
+        await apiFetch(endpoint,{method,body});
         await refreshRoleData();
         closeModal();toast('Destino atualizado','A Smart Page foi preservada e o QR físico continua o mesmo.');render();
       }
@@ -1454,6 +1585,28 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
   });
 
   document.addEventListener('input',(e)=>{
+    const activationFieldMap={
+      'activation-name':'fullName',
+      'activation-company':'companyName',
+      'activation-email':'email',
+      'activation-phone':'phone',
+      'activation-password':'password',
+      'activation-pin':'pin'
+    };
+    if(activationFieldMap[e.target.id]){
+      const key=activationFieldMap[e.target.id];
+      let value=String(e.target.value||'');
+      if(key==='email') value=value.trim().toLowerCase();
+      if(key==='pin') value=value.replace(/\D/g,'').slice(0,6);
+      state.activation[key]=value;
+      if(key==='pin' && e.target.value!==value) e.target.value=value;
+    }
+    if(e.target.dataset?.activationKey){
+      const key=e.target.dataset.activationKey;
+      let value=String(e.target.value||'');
+      if(key==='email') value=value.trim().toLowerCase();
+      state.activation[key]=value;
+    }
     if(e.target.id==='activation-smart-slug'){
       const clean=String(e.target.value||'')
         .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
@@ -1510,9 +1663,9 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
   });
 
   document.addEventListener('click',(e)=>{
-    const choice=e.target.closest('.destination-modal-choice'); if(!choice) return;
-    const form=choice.closest('#destination-form, #seller-destination-form'); if(!form)return;
-    $$('.destination-modal-choice',form).forEach(x=>x.classList.remove('active'));
+    const choice=e.target.closest('.destination-modal-choice, .operator-qr-choice'); if(!choice) return;
+    const form=choice.closest('#destination-form, #seller-destination-form, #operator-qr-form'); if(!form)return;
+    $$('.destination-modal-choice, .operator-qr-choice',form).forEach(x=>x.classList.remove('active'));
     choice.classList.add('active');
     const f=$('[name="type"]',form); if(f) f.value=choice.dataset.type;
     refreshDestinationFields(form,choice.dataset.type);

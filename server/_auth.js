@@ -70,11 +70,30 @@ export async function currentUser(req, res) {
   }
 }
 
+function operatorAccessState(operator) {
+  if (!operator) return 'missing';
+  if (!operator.active) return 'suspended';
+  const now = Date.now();
+  const starts = operator.license_starts_at ? Date.parse(operator.license_starts_at) : null;
+  const ends = operator.license_ends_at ? Date.parse(operator.license_ends_at) : null;
+  if (Number.isFinite(starts) && starts > now) return 'scheduled';
+  if (Number.isFinite(ends) && ends <= now) return 'expired';
+  return 'active';
+}
+
 export async function resolveRole(userId) {
   const admins = await supabaseRest(
     `tap_platform_admins?user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=role&limit=1`
   );
   if (Array.isArray(admins) && admins[0]) return { role: 'admin', adminRole: admins[0].role };
+
+  const operators = await supabaseRest(
+    `tap_business_operators?user_id=eq.${encodeURIComponent(userId)}&select=id,user_id,brand_name,business_email,phone,plan,active,qr_limit,client_limit,smart_page_limit,license_starts_at,license_ends_at&limit=1`
+  ).catch(() => []);
+  if (Array.isArray(operators) && operators[0]) {
+    const operator = operators[0];
+    return { role: 'operator', operator, operatorAccess: operatorAccessState(operator) };
+  }
 
   const sellers = await supabaseRest(
     `tap_sellers?user_id=eq.${encodeURIComponent(userId)}&active=eq.true&select=id,user_id,full_name,phone,commission_rate,active&limit=1`
@@ -154,6 +173,36 @@ export function membershipClientIds(auth) {
 }
 
 
+
+export async function requireOperator(req, res) {
+  const user = await requireUser(req, res);
+  if (!user) return null;
+  const role = await resolveRole(user.id);
+  if (role.role !== 'operator') {
+    res.status(403).json({ ok: false, error: 'OPERATOR_REQUIRED', message: 'Esta ação é exclusiva de operadores TAJO TAP BUSINESS.' });
+    return null;
+  }
+  if (role.operatorAccess !== 'active') {
+    const message = role.operatorAccess === 'expired'
+      ? 'Sua licença operacional expirou. Renove o acesso para continuar administrando novos clientes e QR Codes.'
+      : role.operatorAccess === 'scheduled'
+        ? 'Sua licença operacional ainda não iniciou.'
+        : 'Seu acesso operacional está suspenso. Fale com o suporte TAJO.';
+    res.status(403).json({ ok: false, error: 'OPERATOR_LICENSE_INACTIVE', access: role.operatorAccess, message });
+    return null;
+  }
+  return { user, ...role };
+}
+
+export async function requireOperatorOrAdmin(req, res) {
+  const user = await requireUser(req, res);
+  if (!user) return null;
+  const role = await resolveRole(user.id);
+  if (role.role === 'admin') return { user, ...role };
+  if (role.role === 'operator' && role.operatorAccess === 'active') return { user, ...role };
+  res.status(403).json({ ok: false, error: 'OPERATOR_REQUIRED', message: 'Acesso operacional não autorizado.' });
+  return null;
+}
 export async function requireSeller(req, res) {
   const user = await requireUser(req, res);
   if (!user) return null;

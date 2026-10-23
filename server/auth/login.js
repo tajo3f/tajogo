@@ -30,6 +30,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       role: role.role,
+      operator: role.role === 'operator' ? role.operator : undefined,
+      operatorAccess: role.role === 'operator' ? role.operatorAccess : undefined,
       user: {
         id: session.user.id,
         email: session.user.email || email,

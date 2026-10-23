@@ -1,82 +1,117 @@
-# TAJO TAP V7.1 — Wi‑Fi Connect + Smart Page
+# TAJO TAP BUSINESS V10
 
-TAJO TAP é a plataforma operacional da TAJO para produção, distribuição e gestão de plaquinhas inteligentes, com QR dinâmico, ativação por PIN, lotes, vendedores, clientes, analytics e Smart Pages.
+> Versão atual: **10.0.0** — Smart Page Premium + compatibilidade integral com V8.1.
+> Consulte `V10-INSTALACAO.md`, `CHANGELOG-V10.md` e `RELEASE-CHECKLIST-V10.md`.
+
+# TAJO TAP V8.0 — QR Dinâmico + Operações Licenciadas
+
+TAJO TAP é a plataforma operacional da TAJO Digital para QR Codes Dinâmicos, Smart Pages/bio-sites, plaquinhas inteligentes, NFC, Wi‑Fi Connect, analytics, clientes, vendedores e produção física.
+
+A **V8.0** adiciona a base do **TAJO TAP BUSINESS**: compradores/licenciados podem receber um ambiente operacional isolado para atender a própria carteira sem receber código-fonte ou propriedade do software.
 
 **Sistema desenvolvido por João Paulo Brandão.**
 
-## Novidades da V7.1
+## V8 — Operador BUSINESS
 
+Novo papel `operator` com:
 
-### Correção V7.1 — troca de destino
+- carteira própria de clientes;
+- criação de QR Codes Dinâmicos permanentes;
+- troca de destino sem trocar o QR;
+- criação e gestão de Smart Pages/bio-sites;
+- QR digital ou ativo do tipo plaquinha inteligente;
+- métricas básicas de scans;
+- cotas de clientes, QRs e Smart Pages;
+- licença com início, validade e suspensão;
+- isolamento lógico por `operator_id`;
+- portal próprio separado de admin, seller e cliente.
 
-A V7.1 corrige o fluxo de alteração repetida de destino depois da ativação. A Smart Page permanece vinculada mesmo quando o usuário muda temporariamente para Instagram, WhatsApp, Google, localização ou outro link. O painel permite voltar para a Smart Page sem recriar o biosite.
+O operador **não compra o software**. A TAJO licencia acesso operacional conforme o plano contratado.
 
-O editor também passou a usar campos específicos por destino e o backend não depende mais da RPC antiga `tap_set_plate_destination()` para essas alterações.
+## V7.1 preservada
 
-A V7 adiciona **Wi‑Fi Connect** de duas formas complementares:
+A troca repetida de destinos continua usando o motor compartilhado da V7.1. A Smart Page permanece vinculada mesmo quando o destino muda temporariamente para Instagram, WhatsApp, Google, localização ou link externo.
 
-- **Smart Page + Wi‑Fi (recomendado):** o QR principal permanente da plaquinha continua apontando para `https://go.tajodigital.com.br/q/TT-XXXXXX`, abre a Smart Page e exibe os dados Wi‑Fi do negócio.
-- **QR Wi‑Fi direto:** o sistema gera um segundo QR com o padrão nativo `WIFI:...`. Ao escanear esse QR compatível, o próprio celular oferece a conexão à rede sem exigir digitação manual da senha.
+## Wi‑Fi Connect
 
-O segundo QR é propositalmente separado do QR principal. Um QR Wi‑Fi nativo contém SSID/senha no próprio código e, por isso, **não é dinâmico**. Se a rede ou senha mudar, gere novamente somente esse QR Wi‑Fi. O QR principal TAJO TAP continua permanente.
+A V7 segue disponível de duas formas:
 
-## Segurança do Wi‑Fi
+- **Smart Page + Wi‑Fi:** o QR principal dinâmico abre a Smart Page e mostra os dados da rede;
+- **QR Wi‑Fi direto:** QR separado no padrão `WIFI:...`, destinado à conexão nativa do aparelho.
 
-Novas senhas Wi‑Fi não são gravadas em texto puro no banco. A V7 usa **AES‑256‑GCM** no backend e armazena somente ciphertext, IV e authentication tag em `public.tap_wifi_profiles`.
+O QR Wi‑Fi direto não é dinâmico porque contém SSID/senha no próprio payload. O QR principal TAJO TAP continua permanente.
 
-Configure na Vercel, em Production:
+### Segurança Wi‑Fi
+
+Configure no backend/Vercel:
 
 ```env
-TAJO_WIFI_ENCRYPTION_KEY=<segredo forte com pelo menos 32 caracteres>
+TAJO_WIFI_ENCRYPTION_KEY=<segredo forte e estável com pelo menos 32 caracteres>
 ```
 
-Gere uma chave aleatória, por exemplo:
-
-```bash
-openssl rand -hex 32
-```
-
-Não coloque essa chave no GitHub, frontend ou variável `NEXT_PUBLIC_*`. Guarde uma cópia segura: trocar/perder a chave impede a leitura das senhas já cifradas.
-
-Para estabelecimentos, prefira uma **rede de visitantes** separada da rede administrativa/PDV.
+As senhas novas são cifradas com AES‑256‑GCM e não devem ser expostas no frontend ou GitHub.
 
 ## Banco Supabase
 
-Todas as migrations do backend estão em:
+As migrations incrementais estão em:
 
 ```text
 supabase/migrations/
 ```
 
-O pacote V7 contém as migrations `001` até `010`. Se o ambiente já está atualizado até a V6.2, execute **somente**:
+Para quem já está na **V7.1**, execute somente:
 
 ```text
-010_v7_wifi_connect.sql
+011_v8_business_operator.sql
 ```
 
 Depois rode:
 
 ```text
-supabase/VERIFY_V7.sql
+supabase/VERIFY_V8.sql
 ```
+
+Registros antigos permanecem válidos; dados não pertencentes a operadores continuam com `operator_id = null`.
 
 ## Stack
 
 - HTML/CSS/JavaScript Vanilla
 - Vercel
 - Supabase Auth + PostgreSQL
-- Uma única Vercel Function: `/api/index.js`
+- uma única Vercel Function: `/api/index.js`
 - Node 24.x
-- Sem dependências npm de runtime
+- sem dependências npm de runtime
 
 ## URLs principais
 
 ```text
+Painel:       https://go.tajodigital.com.br
 QR dinâmico:  https://go.tajodigital.com.br/q/TT-XXXXXX
 NFC:          https://go.tajodigital.com.br/n/TT-XXXXXX
 Ativação:     https://go.tajodigital.com.br/atv/TT-XXXXXX
 Smart Page:   https://go.tajodigital.com.br/bio/nome-do-negocio
 ```
+
+## Rotas V8
+
+```text
+/api/operator/hub       portal operacional do licenciado
+/api/admin/operators    gestão dos operadores pela TAJO
+```
+
+O navegador nunca recebe a chave secreta do Supabase. As operações multi-tenant passam pelo backend e são filtradas por `operator_id`.
+
+## Provisionamento inicial
+
+Na V8.0 o fluxo é propositalmente manual para validar a operação antes de automatizar vendas:
+
+1. a conta Auth do comprador precisa existir;
+2. o admin TAJO abre **Operadores BUSINESS**;
+3. vincula o e-mail;
+4. define plano, validade e cotas;
+5. o usuário passa a entrar como `operator`.
+
+A integração automática com Kiwify deve ser feita depois de capturar/testar o payload real de webhook da conta de produção.
 
 ## Testes locais
 
@@ -84,6 +119,11 @@ Smart Page:   https://go.tajodigital.com.br/bio/nome-do-negocio
 npm test
 ```
 
-A suíte valida sintaxe JS, assets, encoder QR, exposição de secrets, limite do Vercel Hobby, compatibilidade das versões anteriores, payload Wi‑Fi, migration V7 e integração estática Smart Page/Wi‑Fi.
+A suíte valida compatibilidade V4–V7.1 e, na V8, migration, licença, cotas, isolamento, Smart Pages, frontend e roteamento serverless.
 
-Consulte `V7-INSTALACAO.md` para a base V7 e `V7.1-INSTALACAO.md` para esta correção.
+## Documentação de atualização
+
+- `V7-INSTALACAO.md` — Wi‑Fi Connect
+- `V7.1-INSTALACAO.md` — troca de destinos
+- `V8-INSTALACAO.md` — Operador BUSINESS
+- `CHANGELOG-V8.md` — resumo técnico da versão

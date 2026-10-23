@@ -21,7 +21,9 @@ export function mapPlate(row) {
     setupStatus: row.setup_status || (row.status === 'active' ? 'completed' : 'pending'),
     configurationLocked: Boolean(row.configuration_locked),
     configuredAt: row.configured_at || null,
-    claimedAt: row.claimed_at || null
+    claimedAt: row.claimed_at || null,
+    operatorId: row.operator_id || null,
+    assetKind: row.asset_kind || 'smart_plate'
   };
 }
 
@@ -38,6 +40,7 @@ export function mapClient(row) {
     state: row.state || '',
     plates: Number(row.plates_count || 0),
     scans: Number(row.scans_total || 0),
-    status: row.status || 'active'
+    status: row.status || 'active',
+    operatorId: row.operator_id || null
   };
 }

@@ -112,6 +112,9 @@ export async function sellerOwnsPlate(sellerId, plateId) {
 export async function canEditSmartPage(role, page) {
   if (!role || !page) return false;
   if (role.role === 'admin') return true;
+  if (role.role === 'operator') {
+    return Boolean(role.operator?.id && page.operator_id === role.operator.id && role.operatorAccess === 'active');
+  }
   if (role.role === 'client') {
     return (role.memberships || []).some((m) => m.client_id === page.client_id && m.active !== false);
   }

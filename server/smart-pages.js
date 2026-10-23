@@ -8,6 +8,10 @@ function clean(v,n=240){return String(v??'').trim().slice(0,n)}
 
 async function rolePages(role){
   if(role.role==='admin') return await supabaseRest('tap_smart_pages?select=*&order=updated_at.desc&limit=500');
+  if(role.role==='operator'){
+    const oid=role.operator?.id; if(!oid)return [];
+    return await supabaseRest(`tap_smart_pages?operator_id=eq.${encodeURIComponent(oid)}&select=*&order=updated_at.desc&limit=500`);
+  }
   if(role.role==='client'){
     const ids=(role.memberships||[]).map(m=>m.client_id).filter(Boolean);
     if(!ids.length)return [];
@@ -34,7 +38,7 @@ function legacyWifi(p){
 function mapPage(req,p,analytics,wifi){
   const wf=wifi||legacyWifi(p);
   return {
-    id:p.id,clientId:p.client_id,plateId:p.plate_id,createdBySellerId:p.created_by_seller_id,slug:p.slug,publicUrl:smartUrl(req,p.slug),
+    id:p.id,clientId:p.client_id,plateId:p.plate_id,operatorId:p.operator_id||null,createdBySellerId:p.created_by_seller_id,slug:p.slug,publicUrl:smartUrl(req,p.slug),
     businessName:p.business_name,subtitle:p.subtitle||'',bio:p.bio||'',logoUrl:p.logo_url||'',coverUrl:p.cover_url||'',
     primaryColor:p.primary_color||'#45E600',backgroundColor:p.background_color||'#0B0D0E',textColor:p.text_color||'#F4F7F2',buttonStyle:p.button_style||'rounded',
     whatsapp:p.whatsapp||'',phone:p.phone||'',publicEmail:p.public_email||'',instagram:p.instagram||'',tiktok:p.tiktok||'',websiteUrl:p.website_url||'',mapsUrl:p.maps_url||'',googleReviewUrl:p.google_review_url||'',
@@ -63,7 +67,8 @@ export default async function handler(req,res){
   try{
     const user=await requireUser(req,res); if(!user)return;
     const role=await resolveRole(user.id);
-    if(!['admin','seller','client'].includes(role.role)) return apiError(res,403,'ACCESS_REQUIRED','Sua conta ainda não possui acesso a Smart Pages.');
+    if(!['admin','seller','client','operator'].includes(role.role)) return apiError(res,403,'ACCESS_REQUIRED','Sua conta ainda não possui acesso a Smart Pages.');
+    if(role.role==='operator' && role.operatorAccess!=='active') return apiError(res,403,'OPERATOR_LICENSE_INACTIVE','Sua licença operacional não está ativa.');
 
     if(req.method==='GET'){
       const pages=await rolePages(role); const analytics=await pageAnalytics((pages||[]).map(p=>p.id));
@@ -72,17 +77,23 @@ export default async function handler(req,res){
 
     const body=readJson(req);
     if(req.method==='POST'){
-      if(!['admin','seller'].includes(role.role)) return apiError(res,403,'CREATE_FORBIDDEN','A Smart Page é criada pela TAJO ou pelo vendedor responsável.');
+      if(!['admin','seller','operator'].includes(role.role)) return apiError(res,403,'CREATE_FORBIDDEN','Sua conta não pode criar Smart Pages.');
       const plateCode=clean(body.plateCode,32).toUpperCase();
       const clientId=clean(body.clientId,80);
       let plate=null;
       if(plateCode){
-        const filter=role.role==='seller'?`&seller_id=eq.${encodeURIComponent(role.seller.id)}`:'';
-        const rows=await supabaseRest(`tap_plates?code=eq.${encodeURIComponent(plateCode)}${filter}&select=id,client_id,seller_id&limit=1`); plate=rows?.[0]||null;
+        const filter=role.role==='seller'?`&seller_id=eq.${encodeURIComponent(role.seller.id)}`:role.role==='operator'?`&operator_id=eq.${encodeURIComponent(role.operator.id)}`:'';
+        const rows=await supabaseRest(`tap_plates?code=eq.${encodeURIComponent(plateCode)}${filter}&select=id,client_id,seller_id,operator_id&limit=1`); plate=rows?.[0]||null;
         if(!plate)return apiError(res,404,'PLATE_NOT_FOUND','Plaquinha não encontrada na sua operação.');
       }
       const cid=plate?.client_id||clientId;
       if(!cid)return apiError(res,400,'CLIENT_REQUIRED','Vincule um cliente antes de criar a Smart Page.');
+      if(role.role==='operator'){
+        const owned=await supabaseRest(`tap_clients?id=eq.${encodeURIComponent(cid)}&operator_id=eq.${encodeURIComponent(role.operator.id)}&select=id&limit=1`);
+        if(!owned?.[0]) return apiError(res,403,'CLIENT_FORBIDDEN','Este cliente não pertence à sua operação.');
+        const pages=await supabaseRest(`tap_smart_pages?operator_id=eq.${encodeURIComponent(role.operator.id)}&select=id`);
+        if((pages?.length||0)>=Number(role.operator.smart_page_limit||0)) return apiError(res,409,'OPERATOR_LIMIT_REACHED','Seu plano atingiu o limite de Smart Pages.');
+      }
       if(plate?.id){
         const existing=await supabaseRest(`tap_smart_pages?plate_id=eq.${encodeURIComponent(plate.id)}&select=*&limit=1`);
         if(existing?.[0]){
@@ -92,7 +103,7 @@ export default async function handler(req,res){
       }
       const businessName=clean(body.businessName,120)||'Minha empresa';
       const slug=await uniqueSlug(body.slug||businessName);
-      const payload={client_id:cid,plate_id:plate?.id||null,created_by_seller_id:role.role==='seller'?role.seller.id:null,slug,business_name:businessName,subtitle:'Sua empresa mais perto do cliente',bio:'Encontre nossos principais canais, localização e informações em um só lugar.',seller_edit_allowed:true,is_published:true,wifi_name:null,wifi_password:null};
+      const payload={client_id:cid,plate_id:plate?.id||null,operator_id:role.role==='operator'?role.operator.id:null,created_by_seller_id:role.role==='seller'?role.seller.id:null,slug,business_name:businessName,subtitle:'Sua empresa mais perto do cliente',bio:'Encontre nossos principais canais, localização e informações em um só lugar.',seller_edit_allowed:role.role==='seller',is_published:true,wifi_name:null,wifi_password:null};
       const rows=await supabaseRest('tap_smart_pages?select=*',{method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify(payload)});
       let wifi=null;
       if(wifiRequested(body) && plate?.id){
@@ -123,10 +134,10 @@ export default async function handler(req,res){
       if(!page.plate_id && normalizeWifiConfig(body).mode!=='off') return apiError(res,409,'WIFI_PLATE_REQUIRED','Vincule a Smart Page a uma plaquinha antes de ativar o Wi-Fi Connect.');
       wifi=await upsertWifiProfile({plateId:page.plate_id,smartPageId:page.id,userId:user.id,config:body});
     }
-    await supabaseRest('tap_audit_logs',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify({actor_user_id:user.id,action:'smart_page.update.v7',entity_type:'smart_page',entity_id:page.id,metadata:{role:role.role,wifi_mode:wifi?.mode||'off'}})}).catch(()=>null);
+    await supabaseRest('tap_audit_logs',{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify({actor_user_id:user.id,action:'smart_page.update.v10',entity_type:'smart_page',entity_id:page.id,metadata:{role:role.role,wifi_mode:wifi?.mode||'off'}})}).catch(()=>null);
     return res.status(200).json({ok:true,page:mapPage(req,updated?.[0]||{...page,...patch},null,wifi)});
   }catch(error){
-    console.error('[smart-pages:v7]',{code:publicErrorCode(error),status:error?.status,detail:error?.detail||error?.message});
+    console.error('[smart-pages:v10]',{code:publicErrorCode(error),status:error?.status,detail:error?.detail||error?.message});
     if(error?.code==='WIFI_SSID_INVALID') return apiError(res,400,'WIFI_SSID_INVALID','Informe o nome da rede Wi-Fi.');
     if(error?.code==='WIFI_PASSWORD_INVALID') return apiError(res,400,'WIFI_PASSWORD_INVALID','Use uma senha compatível com o tipo de segurança escolhido. Para WPA/WPA2/WPA3, use 8 a 63 caracteres.');
     if(error?.code==='WIFI_ENCRYPTION_KEY_MISSING') return apiError(res,503,'WIFI_ENCRYPTION_KEY_MISSING','Configure TAJO_WIFI_ENCRYPTION_KEY na Vercel para usar o Wi-Fi Connect.');

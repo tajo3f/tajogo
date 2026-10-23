@@ -21,6 +21,8 @@ import adminOperations from '../server/admin/operations.js';
 import smartPages from '../server/smart-pages.js';
 import publicSmartPage from '../server/public/smart-page.js';
 import publicSmartLink from '../server/public/smart-link.js';
+import operatorHub from '../server/operator/hub.js';
+import adminOperators from '../server/admin/operators.js';
 
 const ROUTES = new Map([
   ['auth/login', authLogin],
@@ -45,7 +47,9 @@ const ROUTES = new Map([
   ['admin/operations', adminOperations],
   ['smart-pages', smartPages],
   ['public/smart-page', publicSmartPage],
-  ['public/smart-link', publicSmartLink]
+  ['public/smart-link', publicSmartLink],
+  ['operator/hub', operatorHub],
+  ['admin/operators', adminOperators]
 ]);
 
 function routeName(value) {
