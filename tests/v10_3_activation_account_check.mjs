@@ -1,0 +1,20 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+const root = path.resolve(process.cwd());
+const activate = fs.readFileSync(path.join(root,'server','public','activate.js'),'utf8');
+const app = fs.readFileSync(path.join(root,'assets','js','app.js'),'utf8');
+const pkg = JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
+const version = fs.readFileSync(path.join(root,'VERSION.txt'),'utf8').trim();
+function ok(v,msg){ if(!v){ console.error('FAIL:',msg); process.exit(1); } }
+ok(activate.includes("supabaseAuthAdmin('users'"), 'activation signup must use server-side Auth Admin creation');
+ok(activate.includes('email_confirm: true'), 'activation-created account must be immediately usable');
+ok(activate.includes("token?grant_type=password"), 'activation must establish a password session after account creation');
+ok(activate.includes('isExistingAuthAccount'), 'duplicate account detection must inspect actual auth error');
+ok(!activate.includes("supabaseAuth('signup'"), 'public signup must not be used in activation flow');
+ok(!activate.includes("ACCOUNT_EXISTS_OR_INVALID"), '422 must not be blindly mapped to account exists');
+ok(app.includes("if(err.code==='ACCOUNT_EXISTS'){"), 'frontend must switch to existing-account mode only for a confirmed duplicate');
+ok(!app.includes("ACCOUNT_EXISTS_OR_INVALID"), 'frontend must not keep legacy ambiguous duplicate handling');
+ok(pkg.version === '10.3.0', 'package version must be 10.3.0');
+ok(version === '10.3.0', 'VERSION.txt must be 10.3.0');
+console.log('V10.3 activation account regression checks passed.');

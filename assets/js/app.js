@@ -1463,7 +1463,7 @@ PIN: ${p.activationPin}`)}">Copiar ativação</button>`:''}<button class="btn bt
           }
         }
       } catch(err) {
-        if(err.code==='ACCOUNT_EXISTS'||err.code==='ACCOUNT_EXISTS_OR_INVALID'){ state.activation.accountMode='existing';state.activation.step=2; }
+        if(err.code==='ACCOUNT_EXISTS'){ state.activation.accountMode='existing';state.activation.step=2; }
         if(['PIN_INVALID','PIN_LOCKED','PIN_EXPIRED','PIN_USED'].includes(err.code)){ state.activation.step=3; }
         if(err.code==='EMAIL_MISMATCH'){ state.activation.step=2; await loadActivationPlate(state.activation.code); }
         toast('Não foi possível ativar',`${err.message}${err.reference ? ` · Ref. ${err.reference}` : ''}`);

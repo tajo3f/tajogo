@@ -12,5 +12,5 @@ const smart=fs.readFileSync(path.join(root,'server','public','smart-page.js'),'u
 ok(smart.includes('/assets/images/favicon-32.png'), 'Smart Page favicon missing');
 ok(smart.includes('/assets/images/icon-192.png'), 'Smart Page apple touch icon missing');
 const version=fs.readFileSync(path.join(root,'VERSION.txt'),'utf8').trim();
-ok(version==='10.2.0','VERSION must be 10.2.0');
+ok(/^10\.(?:2|[3-9]|[1-9]\d)\./.test(version) || /^1[1-9]\./.test(version), 'VERSION must be 10.2.0 or newer');
 console.log('V10.2 branding checks passed');

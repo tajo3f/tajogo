@@ -1,7 +1,7 @@
 {
   "name": "tajo-tap-backend",
   "private": true,
-  "version": "10.2.0",
+  "version": "10.3.0",
   "type": "module",
   "engines": {
     "node": "24.x"
@@ -10,7 +10,7 @@
     "check:js": "node tests/check_js.mjs",
     "check:static": "python tests/static_check.py",
     "check:qr": "node tests/qr_check.cjs",
-    "test": "npm run check:js && npm run check:static && npm run check:qr && npm run check:security && npm run check:vercel && npm run check:v4.1 && npm run check:v4.2 && npm run check:v4.3 && npm run check:v4.4 && npm run check:v5 && npm run check:v6 && npm run check:v6.1 && npm run check:v6.2 && npm run check:wifi && npm run check:v7 && npm run check:v7.1 && npm run check:v8 && npm run check:v8.1 && npm run check:v10 && npm run check:v10.1 && npm run check:v10.2",
+    "test": "npm run check:js && npm run check:static && npm run check:qr && npm run check:security && npm run check:vercel && npm run check:v4.1 && npm run check:v4.2 && npm run check:v4.3 && npm run check:v4.4 && npm run check:v5 && npm run check:v6 && npm run check:v6.1 && npm run check:v6.2 && npm run check:wifi && npm run check:v7 && npm run check:v7.1 && npm run check:v8 && npm run check:v8.1 && npm run check:v10 && npm run check:v10.1 && npm run check:v10.2 && npm run check:v10.3",
     "check:security": "python tests/security_check.py",
     "check:vercel": "python tests/vercel_function_count.py",
     "check:v4.1": "node tests/v4_1_check.mjs",
@@ -28,6 +28,7 @@
     "check:v8.1": "node tests/v8_1_check.mjs",
     "check:v10": "node tests/v10_smart_page_check.mjs",
     "check:v10.1": "node tests/v10_1_wifi_connect_check.mjs",
-    "check:v10.2": "node tests/v10_2_branding_check.mjs"
+    "check:v10.2": "node tests/v10_2_branding_check.mjs",
+    "check:v10.3": "node tests/v10_3_activation_account_check.mjs"
   }
 }
