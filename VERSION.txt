@@ -1,2 +1,1 @@
-TAJO TAP FULLSTACK V10.0
-Smart Page Premium / BUSINESS Operator / Mobile Activation Fix
+10.2.0

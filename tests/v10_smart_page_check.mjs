@@ -14,7 +14,7 @@ for (const marker of [
   'bio-ticker',
   'bio-service-grid',
   'Desenvolvido por TAJO DIGITAL 3F',
-  'wifi-qr-canvas',
+  'data-connect-wifi',
   'prefers-reduced-motion'
 ]) assert.ok(publicPage.includes(marker), `V10 Smart Page marker ausente: ${marker}`);
 
@@ -25,7 +25,7 @@ assert.ok(publicPage.includes("customCards(slug, page.custom_links)"), 'Links pe
 assert.ok(publicPage.includes('getWifiProfileBySmartPage'), 'Wi-Fi Connect precisa continuar integrado.');
 assert.ok(publicPage.includes('tap_smart_page_events'), 'Analytics de visualização precisa permanecer ativo.');
 
-assert.ok(app.includes('TAJO SMART PAGE · V10'), 'Editor deve identificar a V10.');
+assert.ok(app.includes('TAJO SMART PAGE · V10.1'), 'Editor deve identificar a V10.1.');
 assert.ok(app.includes('Rótulo | URL | Descrição'), 'Editor V10 deve aceitar descrição em links extras.');
 assert.ok(app.includes('Serviços — Nome | Descrição'), 'Editor V10 deve aceitar descrição dos serviços.');
 assert.ok(app.includes('const description=parts.join'), 'Parser de links deve preservar descrição.');

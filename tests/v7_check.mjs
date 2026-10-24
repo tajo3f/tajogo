@@ -29,12 +29,12 @@ add('modo aberto sem campo P', wifi.includes('WIFI:T:nopass;S:${ssid};H:${hidden
 add('ativação V7', activate.includes("activationEngine: 'REST_V7'") && activate.includes("'wifi', 'hybrid'"));
 add('Smart Page + Wi-Fi persistido', activate.includes('upsertWifiProfile') && pages.includes('upsertWifiProfile'));
 add('V7 não grava nova senha Wi-Fi em plaintext legado', pages.includes('patch.wifi_password=null') && pages.includes('patch.wifi_name=null'));
-add('Smart Page pública renderiza Wi-Fi', publicPage.includes('wifiSection(wifi)') && publicPage.includes('wifi-qr-canvas'));
-add('QR Wi-Fi público sem script inline', publicPage.includes('/assets/js/qr-core.js') && publicPage.includes('/assets/js/smart-page.js'));
-add('JS público gera QR Wi-Fi', publicJs.includes('wifi-qr-canvas') && publicJs.includes('TajoQRCodeCore'));
+add('Smart Page pública renderiza Wi-Fi', publicPage.includes('wifiSection(wifi') && publicPage.includes('data-connect-wifi'));
+add('JS público externo preservado', publicPage.includes('/assets/js/smart-page.js') && !publicPage.includes('wifi-qr-canvas'));
+add('JS público executa conexão assistida', publicJs.includes('data-connect-wifi') && publicJs.includes('Senha copiada'));
 add('UI possui Wi-Fi e híbrido', app.includes("['hybrid','Smart Page + Wi-Fi'") && app.includes("['wifi','Wi-Fi Connect'"));
-add('download do QR Wi-Fi', app.includes('downloadPayloadQR') && app.includes('download-payload-qr'));
-add('aviso de QR separado', app.includes('O QR Wi-Fi direto é separado do QR dinâmico principal'));
+add('segundo QR Wi-Fi removido da experiência atual', !app.includes('download-payload-qr') && !publicPage.includes('Mostrar QR Wi-Fi'));
+add('aviso de conexão assistida', app.includes('Conexão assistida:') && app.includes('Se a senha mudar, basta atualizar no painel.'));
 add('health informa subsistema Wi-Fi sem expor segredo', health.includes("wifiConnect:") && !health.includes('TAJO_WIFI_ENCRYPTION_KEY:'));
 add('rota /bio preservada', vercel.includes('/bio/:slug'));
 add('crédito do desenvolvedor preservado', publicPage.includes('Sistema desenvolvido por João Paulo Brandão'));

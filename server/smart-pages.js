@@ -32,7 +32,7 @@ function legacyWifi(p){
   const name=String(p?.wifi_name||'').trim();
   const password=String(p?.wifi_password||'');
   if(!name)return null;
-  return {mode:'hybrid',ssid:name,security:password?'WPA':'nopass',password,hidden:false,publicEnabled:true,directQrEnabled:true,label:'Wi-Fi do estabelecimento',payload:''};
+  return {mode:'hybrid',ssid:name,security:password?'WPA':'nopass',password,hidden:false,publicEnabled:true,directQrEnabled:false,label:'Wi-Fi do estabelecimento',payload:''};
 }
 
 function mapPage(req,p,analytics,wifi){

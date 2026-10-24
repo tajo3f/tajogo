@@ -24,7 +24,7 @@ export function normalizeWifiConfig(input = {}) {
   const password = String(input.wifiPassword ?? input.password ?? '').slice(0, 160);
   const hidden = Boolean(input.wifiHidden ?? input.hidden);
   const publicEnabled = input.wifiPublicEnabled === undefined ? mode !== 'off' : Boolean(input.wifiPublicEnabled);
-  const directQrEnabled = input.wifiDirectQrEnabled === undefined ? mode !== 'off' : Boolean(input.wifiDirectQrEnabled);
+  const directQrEnabled = input.wifiDirectQrEnabled === undefined ? false : Boolean(input.wifiDirectQrEnabled);
   const label = clean(input.wifiLabel ?? input.label, 80) || 'Wi-Fi do estabelecimento';
 
   if (mode !== 'off') {

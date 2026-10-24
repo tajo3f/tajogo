@@ -416,7 +416,7 @@ export default async function handler(req, res) {
           wifiPassword: body?.wifiPassword,
           wifiHidden: body?.wifiHidden,
           wifiPublicEnabled: true,
-          wifiDirectQrEnabled: true,
+          wifiDirectQrEnabled: false,
           wifiLabel: body?.wifiLabel
         });
       } catch (wifiError) {

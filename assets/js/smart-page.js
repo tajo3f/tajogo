@@ -13,51 +13,58 @@
     }, 1800);
   };
 
-  const drawQR = (canvas, text) => {
-    if (!canvas || !text || !window.TajoQRCodeCore) return;
-    const QR = window.TajoQRCodeCore;
-    const levels = window.TajoQRErrorCorrectLevel;
-    const qr = new QR(-1, levels.H);
-    qr.addData(text); qr.make();
-    const count = qr.getModuleCount();
-    const ctx = canvas.getContext('2d');
-    const size = canvas.width;
-    const quiet = 4;
-    const cell = size / (count + quiet * 2);
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, size, size);
-    ctx.fillStyle = '#050706';
-    for (let r = 0; r < count; r += 1) {
-      for (let c = 0; c < count; c += 1) {
-        if (!qr.isDark(r, c)) continue;
-        const x = Math.round((c + quiet) * cell);
-        const y = Math.round((r + quiet) * cell);
-        const x2 = Math.round((c + quiet + 1) * cell);
-        const y2 = Math.round((r + quiet + 1) * cell);
-        ctx.fillRect(x, y, x2 - x, y2 - y);
-      }
+  const copyText = async (value) => {
+    if (!value) return false;
+    try { await navigator.clipboard.writeText(value); return true; }
+    catch {
+      try {
+        const area = document.createElement('textarea');
+        area.value = value; area.setAttribute('readonly', ''); area.style.position = 'fixed'; area.style.opacity = '0';
+        document.body.appendChild(area); area.select();
+        const ok = document.execCommand('copy'); area.remove(); return ok;
+      } catch { return false; }
     }
   };
 
-  document.querySelectorAll('.wifi-qr-canvas').forEach((canvas) => drawQR(canvas, canvas.dataset.wifiPayload || ''));
+  const connectWifi = async (button) => {
+    const ssid = button.dataset.wifiSsid || '';
+    const password = button.dataset.wifiPassword || '';
+    const security = (button.dataset.wifiSecurity || 'WPA').toLowerCase();
+    const androidIntent = button.matches('[data-android-wifi-intent]');
+    const ua = navigator.userAgent || '';
+    const ios = /iPhone|iPad|iPod/i.test(ua);
+
+    if (security !== 'nopass' && password) {
+      // Do not await here on Android: the intent must remain directly tied to the user's tap.
+      if (androidIntent) copyText(password).catch(() => false);
+      else await copyText(password);
+    }
+
+    if (androidIntent) {
+      show(security === 'nopass' ? `Selecione a rede ${ssid}` : `Senha copiada · selecione ${ssid}`);
+      return { allowDefault: true };
+    }
+    if (ios) {
+      show(security === 'nopass' ? `Ajustes › Wi-Fi › ${ssid}` : `Senha copiada · Ajustes › Wi-Fi › ${ssid}`);
+      return { allowDefault: false };
+    }
+    show(security === 'nopass' ? `Selecione a rede ${ssid}` : `Senha copiada · conecte-se à rede ${ssid}`);
+    return { allowDefault: false };
+  };
 
   document.addEventListener('click', async (event) => {
     const copy = event.target.closest('[data-copy]');
     if (copy) {
       event.preventDefault();
       const value = copy.dataset.copy || '';
-      try { await navigator.clipboard.writeText(value); show('Copiado'); }
-      catch { show('Não foi possível copiar'); }
+      const ok = await copyText(value);
+      show(ok ? 'Copiado' : 'Não foi possível copiar');
       return;
     }
-    const toggle = event.target.closest('[data-toggle-wifi-qr]');
-    if (toggle) {
-      event.preventDefault();
-      const card = toggle.closest('.wifi-card');
-      const wrap = card?.querySelector('.wifi-qr-wrap');
-      if (wrap) {
-        wrap.classList.toggle('is-visible');
-        toggle.textContent = wrap.classList.contains('is-visible') ? 'Ocultar QR Wi-Fi' : 'Mostrar QR Wi-Fi';
-      }
+    const connect = event.target.closest('[data-connect-wifi]');
+    if (connect) {
+      const result = await connectWifi(connect);
+      if (!result?.allowDefault) event.preventDefault();
       return;
     }
     const share = event.target.closest('[data-share]');
