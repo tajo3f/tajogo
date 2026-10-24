@@ -79,6 +79,76 @@ function maskEmail(value) {
   return `${visible}${'*'.repeat(Math.max(3, Math.min(8, local.length - 1)))}@${domain}`;
 }
 
+function authErrorCode(error) {
+  const payload = error?.payload && typeof error.payload === 'object' ? error.payload : {};
+  return String(payload.code || payload.error_code || payload.error || '').trim().toLowerCase();
+}
+
+function authErrorText(error) {
+  const payload = error?.payload;
+  const parts = [
+    typeof payload === 'object' ? payload?.message : payload,
+    typeof payload === 'object' ? payload?.msg : null,
+    error?.detail,
+    error?.message
+  ].filter(Boolean);
+  return parts.join(' ').toLowerCase();
+}
+
+function isExistingAuthAccount(error) {
+  const code = authErrorCode(error);
+  const textValue = authErrorText(error);
+  return ['email_exists','user_already_exists','email_conflict','user_exists'].includes(code)
+    || /already\s+(been\s+)?registered|already\s+exists|email\s+exists|user\s+already/.test(textValue);
+}
+
+async function passwordLogin(email, password) {
+  return supabaseAuth('token?grant_type=password', {
+    method: 'POST',
+    body: JSON.stringify({ email, password })
+  });
+}
+
+async function createActivationAccount({ email, password, fullName, phone }) {
+  // V10.3: a ativação já foi autorizada por plaquinha + PIN. Criamos a conta
+  // pelo Admin API para não depender da opção "Allow new users to sign up"
+  // do Supabase Auth, que podia devolver 422 e ser confundida com conta existente.
+  try {
+    const user = await supabaseAuthAdmin('users', {
+      method: 'POST',
+      body: JSON.stringify({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { full_name: fullName, phone }
+      })
+    });
+    if (!user?.id) {
+      const error = new Error('AUTH_USER_CREATE_EMPTY');
+      error.code = 'AUTH_USER_CREATE_EMPTY';
+      throw error;
+    }
+    return { user, created: true };
+  } catch (error) {
+    if (!isExistingAuthAccount(error)) throw error;
+
+    // Recuperação amigável: se esse e-mail já existir e a senha informada for
+    // a mesma, seguimos sem obrigar o cliente a voltar uma etapa.
+    try {
+      const session = await passwordLogin(email, password);
+      if (session?.user?.id) return { user: session.user, session, created: false, recoveredExisting: true };
+    } catch {
+      // A conta existe, mas a senha informada não autenticou. O front orienta
+      // a usar "Já tenho uma conta" sem fingir que todo erro 422 é duplicidade.
+    }
+
+    const exists = new Error('ACCOUNT_EXISTS');
+    exists.code = 'ACCOUNT_EXISTS';
+    exists.status = 409;
+    throw exists;
+  }
+}
+
 async function getAccessReservation(plate) {
   const inviteRows = await supabaseRest(
     `tap_client_access_invites?plate_id=eq.${encodeURIComponent(plate.id)}&status=eq.pending&select=id,client_id,plate_id,seller_id,email,status,created_at&order=created_at.desc&limit=1`
@@ -450,30 +520,51 @@ export default async function handler(req, res) {
       if (!email || !/^\S+@\S+\.\S+$/.test(email)) return apiError(res, 400, 'EMAIL_INVALID', 'Informe um e-mail válido.');
       if (password.length < 8 || password.length > 200) return apiError(res, 400, 'PASSWORD_INVALID', 'Crie uma senha com pelo menos 8 caracteres.');
 
-      let signup;
+      let account;
       try {
-        signup = await supabaseAuth('signup', {
-          method: 'POST',
-          body: JSON.stringify({ email, password, data: { full_name: fullName, phone } })
-        });
+        account = await createActivationAccount({ email, password, fullName, phone });
       } catch (error) {
+        if (error?.code === 'ACCOUNT_EXISTS') {
+          return apiError(res, 409, 'ACCOUNT_EXISTS', 'Este e-mail já possui uma conta. Use “Já tenho uma conta”.');
+        }
+        const code = authErrorCode(error);
+        const textValue = authErrorText(error);
         if (error?.status === 400 || error?.status === 422) {
-          return apiError(res, 409, 'ACCOUNT_EXISTS_OR_INVALID', 'Não foi possível criar essa conta. Se você já possui cadastro, use “Já tenho uma conta”.');
+          const passwordRejected = code.includes('password') || /password|senha/.test(textValue);
+          return apiError(
+            res,
+            400,
+            passwordRejected ? 'PASSWORD_REJECTED' : 'ACCOUNT_CREATE_INVALID',
+            passwordRejected
+              ? 'A senha não atende à política de segurança. Use uma senha mais forte e tente novamente.'
+              : 'Não foi possível criar a conta com esses dados. Revise o e-mail e a senha e tente novamente.'
+          );
         }
         throw error;
       }
 
-      if (!signup?.user?.id || (Array.isArray(signup.user.identities) && signup.user.identities.length === 0)) {
-        return apiError(res, 409, 'ACCOUNT_EXISTS', 'Este e-mail já possui uma conta. Use “Já tenho uma conta”.');
+      user = account.user;
+      createdUserId = account.created ? user.id : null;
+      createdNewUser = Boolean(account.created);
+
+      let signupSession = account.session || null;
+      if (!signupSession?.access_token || !signupSession?.refresh_token) {
+        try {
+          signupSession = await passwordLogin(email, password);
+        } catch (loginError) {
+          if (createdNewUser && createdUserId) {
+            await supabaseAuthAdmin(`users/${encodeURIComponent(createdUserId)}`, { method: 'DELETE' }).catch(() => null);
+            createdUserId = null;
+            createdNewUser = false;
+          }
+          throw loginError;
+        }
       }
 
-      user = signup.user;
-      createdUserId = user.id;
-      createdNewUser = true;
-      const signupSession = signup.session || signup;
       if (signupSession?.access_token && signupSession?.refresh_token) {
         setSessionCookies(res, signupSession);
         sessionReady = true;
+        if (signupSession.user?.id) user = signupSession.user;
       }
     }
 
